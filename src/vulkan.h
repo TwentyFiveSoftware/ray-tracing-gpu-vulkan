@@ -69,12 +69,17 @@ private:
     vk::Image swapChainImage;
     vk::ImageView swapChainImageView;
 
-    vk::DescriptorSetLayout descriptorSetLayout;
-    vk::DescriptorPool descriptorPool;
-    vk::DescriptorSet descriptorSet;
+    vk::DescriptorSetLayout computeDescriptorSetLayout;
+    vk::DescriptorPool computeDescriptorPool;
+    vk::DescriptorSet computeDescriptorSet;
+    vk::PipelineLayout computePipelineLayout;
+    vk::Pipeline computePipeline;
 
-    vk::PipelineLayout pipelineLayout;
-    vk::Pipeline pipeline;
+    vk::DescriptorSetLayout rtDescriptorSetLayout;
+    vk::DescriptorPool rtDescriptorPool;
+    vk::DescriptorSet rtDescriptorSet;
+    vk::PipelineLayout rtPipelineLayout;
+    vk::Pipeline rtPipeline;
 
     vk::CommandBuffer commandBuffer;
 
@@ -109,7 +114,9 @@ private:
 
     void createPipelineLayout();
 
-    void createPipeline();
+    void createComputePipeline();
+
+    void createRTPipeline();
 
     [[nodiscard]] static std::vector<char> readBinaryFile(const std::string &path);
 
@@ -128,7 +135,8 @@ private:
             const vk::AccessFlagBits &srcAccessFlags, const vk::AccessFlagBits &dstAccessFlags,
             const vk::ImageLayout &oldLayout, const vk::ImageLayout &newLayout, const vk::Image &image) const;
 
-    [[nodiscard]] VulkanImage createImage(const vk::Format &format, const vk::Flags<vk::ImageUsageFlagBits> usageFlagBits);
+    [[nodiscard]] VulkanImage
+    createImage(const vk::Format &format, const vk::Flags<vk::ImageUsageFlagBits> usageFlagBits);
 
     void destroyImage(const VulkanImage &image) const;
 

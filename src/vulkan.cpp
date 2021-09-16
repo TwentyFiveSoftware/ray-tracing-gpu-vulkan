@@ -21,7 +21,8 @@ Vulkan::Vulkan(VulkanSettings settings) :
     createDescriptorPool();
     createDescriptorSet();
     createPipelineLayout();
-    createPipeline();
+    createComputePipeline();
+    createRTPipeline();
     createCommandBuffer();
     createFence();
     createSemaphore();
@@ -30,10 +31,16 @@ Vulkan::Vulkan(VulkanSettings settings) :
 Vulkan::~Vulkan() {
     device.destroySemaphore(semaphore);
     device.destroyFence(fence);
-    device.destroyPipeline(pipeline);
-    device.destroyPipelineLayout(pipelineLayout);
-    device.destroyDescriptorSetLayout(descriptorSetLayout);
-    device.destroyDescriptorPool(descriptorPool);
+
+    device.destroyPipeline(computePipeline);
+    device.destroyPipeline(rtPipeline);
+    device.destroyPipelineLayout(computePipelineLayout);
+    device.destroyPipelineLayout(rtPipelineLayout);
+    device.destroyDescriptorSetLayout(computeDescriptorSetLayout);
+    device.destroyDescriptorSetLayout(rtDescriptorSetLayout);
+    device.destroyDescriptorPool(computeDescriptorPool);
+    device.destroyDescriptorPool(rtDescriptorPool);
+
     device.destroyImageView(swapChainImageView);
     device.destroySwapchainKHR(swapChain);
     device.destroyCommandPool(commandPool);
@@ -300,78 +307,189 @@ vk::ImageView Vulkan::createImageView(const vk::Image &image, const vk::Format &
 }
 
 void Vulkan::createDescriptorSetLayout() {
-    std::vector<vk::DescriptorSetLayoutBinding> bindings = {
-            {
-                    .binding = 0,
-                    .descriptorType = vk::DescriptorType::eStorageImage,
-                    .descriptorCount = 1,
-                    .stageFlags = vk::ShaderStageFlagBits::eCompute
-            }
-    };
 
-    descriptorSetLayout = device.createDescriptorSetLayout(
-            {
-                    .bindingCount = static_cast<uint32_t>(bindings.size()),
-                    .pBindings = bindings.data()
-            });
+    // COMPUTE PIPELINE
+    {
+        std::vector<vk::DescriptorSetLayoutBinding> bindings = {
+                {
+                        .binding = 0,
+                        .descriptorType = vk::DescriptorType::eStorageImage,
+                        .descriptorCount = 1,
+                        .stageFlags = vk::ShaderStageFlagBits::eCompute
+                }
+        };
+
+        computeDescriptorSetLayout = device.createDescriptorSetLayout(
+                {
+                        .bindingCount = static_cast<uint32_t>(bindings.size()),
+                        .pBindings = bindings.data()
+                });
+    }
+
+    // RAY TRACING PIPELINE
+    {
+        std::vector<vk::DescriptorSetLayoutBinding> bindings = {
+                {
+                        .binding = 0,
+                        .descriptorType = vk::DescriptorType::eStorageImage,
+                        .descriptorCount = 1,
+                        .stageFlags = vk::ShaderStageFlagBits::eRaygenKHR
+                },
+                {
+                        .binding = 1,
+                        .descriptorType = vk::DescriptorType::eAccelerationStructureKHR,
+                        .descriptorCount = 1,
+                        .stageFlags = vk::ShaderStageFlagBits::eRaygenKHR | vk::ShaderStageFlagBits::eClosestHitKHR
+                }
+        };
+
+        rtDescriptorSetLayout = device.createDescriptorSetLayout(
+                {
+                        .bindingCount = static_cast<uint32_t>(bindings.size()),
+                        .pBindings = bindings.data()
+                });
+    }
+
 }
 
 void Vulkan::createDescriptorPool() {
-    std::vector<vk::DescriptorPoolSize> poolSizes = {
-            {
-                    .type = vk::DescriptorType::eStorageImage,
-                    .descriptorCount = 1
-            }
-    };
 
-    descriptorPool = device.createDescriptorPool(
-            {
-                    .maxSets = 1,
-                    .poolSizeCount = static_cast<uint32_t>(poolSizes.size()),
-                    .pPoolSizes = poolSizes.data()
-            });
+    // COMPUTE PIPELINE
+    {
+        std::vector<vk::DescriptorPoolSize> poolSizes = {
+                {
+                        .type = vk::DescriptorType::eStorageImage,
+                        .descriptorCount = 1
+                }
+        };
+
+        computeDescriptorPool = device.createDescriptorPool(
+                {
+                        .maxSets = 1,
+                        .poolSizeCount = static_cast<uint32_t>(poolSizes.size()),
+                        .pPoolSizes = poolSizes.data()
+                });
+    }
+
+    // RAY TRACING PIPELINE
+    {
+        std::vector<vk::DescriptorPoolSize> poolSizes = {
+                {
+                        .type = vk::DescriptorType::eStorageImage,
+                        .descriptorCount = 1
+                },
+                {
+                        .type = vk::DescriptorType::eAccelerationStructureKHR,
+                        .descriptorCount = 1
+                }
+        };
+
+        rtDescriptorPool = device.createDescriptorPool(
+                {
+                        .maxSets = 1,
+                        .poolSizeCount = static_cast<uint32_t>(poolSizes.size()),
+                        .pPoolSizes = poolSizes.data()
+                });
+    }
+
 }
 
 void Vulkan::createDescriptorSet() {
-    descriptorSet = device.allocateDescriptorSets(
-            {
-                    .descriptorPool = descriptorPool,
-                    .descriptorSetCount = 1,
-                    .pSetLayouts = &descriptorSetLayout
-            }).front();
+
+    // COMPUTE PIPELINE
+    {
+        computeDescriptorSet = device.allocateDescriptorSets(
+                {
+                        .descriptorPool = computeDescriptorPool,
+                        .descriptorSetCount = 1,
+                        .pSetLayouts = &computeDescriptorSetLayout
+                }).front();
 
 
-    vk::DescriptorImageInfo renderTargetImageInfo = {
-            .imageView = renderTargetImage.imageView,
-            .imageLayout = vk::ImageLayout::eGeneral
-    };
+        vk::DescriptorImageInfo renderTargetImageInfo = {
+                .imageView = renderTargetImage.imageView,
+                .imageLayout = vk::ImageLayout::eGeneral
+        };
 
-    std::vector<vk::WriteDescriptorSet> descriptorWrites = {
-            {
-                    .dstSet = descriptorSet,
-                    .dstBinding = 0,
-                    .dstArrayElement = 0,
-                    .descriptorCount = 1,
-                    .descriptorType = vk::DescriptorType::eStorageImage,
-                    .pImageInfo = &renderTargetImageInfo
-            }
-    };
+        std::vector<vk::WriteDescriptorSet> descriptorWrites = {
+                {
+                        .dstSet = computeDescriptorSet,
+                        .dstBinding = 0,
+                        .dstArrayElement = 0,
+                        .descriptorCount = 1,
+                        .descriptorType = vk::DescriptorType::eStorageImage,
+                        .pImageInfo = &renderTargetImageInfo
+                }
+        };
 
-    device.updateDescriptorSets(static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data(),
-                                0, nullptr);
+        device.updateDescriptorSets(static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data(),
+                                    0, nullptr);
+    }
+
+    // RAY TRACING PIPELINE
+    {
+        rtDescriptorSet = device.allocateDescriptorSets(
+                {
+                        .descriptorPool = rtDescriptorPool,
+                        .descriptorSetCount = 1,
+                        .pSetLayouts = &rtDescriptorSetLayout
+                }).front();
+
+
+        vk::DescriptorImageInfo renderTargetImageInfo = {
+                .imageView = renderTargetImage.imageView,
+                .imageLayout = vk::ImageLayout::eGeneral
+        };
+
+        vk::WriteDescriptorSetAccelerationStructureKHR accelerationStructureInfo = {
+                .accelerationStructureCount = 1,
+//                .pAccelerationStructures =
+        };
+
+        std::vector<vk::WriteDescriptorSet> descriptorWrites = {
+                {
+                        .dstSet = rtDescriptorSet,
+                        .dstBinding = 0,
+                        .dstArrayElement = 0,
+                        .descriptorCount = 1,
+                        .descriptorType = vk::DescriptorType::eStorageImage,
+                        .pImageInfo = &renderTargetImageInfo
+                },
+                {
+                        .pNext = &accelerationStructureInfo,
+                        .dstSet = rtDescriptorSet,
+                        .dstBinding = 1,
+                        .dstArrayElement = 0,
+                        .descriptorCount = 1,
+                        .descriptorType = vk::DescriptorType::eAccelerationStructureKHR
+                }
+        };
+
+//        device.updateDescriptorSets(static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data(),
+//                                    0, nullptr);
+    }
+
 }
 
 void Vulkan::createPipelineLayout() {
-    pipelineLayout = device.createPipelineLayout(
+    computePipelineLayout = device.createPipelineLayout(
             {
                     .setLayoutCount = 1,
-                    .pSetLayouts = &descriptorSetLayout,
+                    .pSetLayouts = &computeDescriptorSetLayout,
+                    .pushConstantRangeCount = 0,
+                    .pPushConstantRanges = nullptr
+            });
+
+    rtPipelineLayout = device.createPipelineLayout(
+            {
+                    .setLayoutCount = 1,
+                    .pSetLayouts = &rtDescriptorSetLayout,
                     .pushConstantRangeCount = 0,
                     .pPushConstantRanges = nullptr
             });
 }
 
-void Vulkan::createPipeline() {
+void Vulkan::createComputePipeline() {
     std::vector<char> computeShaderCode = readBinaryFile("shader.comp.spv");
 
     vk::ShaderModuleCreateInfo shaderModuleCreateInfo = {
@@ -389,12 +507,16 @@ void Vulkan::createPipeline() {
 
     vk::ComputePipelineCreateInfo pipelineCreateInfo = {
             .stage = shaderStage,
-            .layout = pipelineLayout
+            .layout = computePipelineLayout
     };
 
-    pipeline = device.createComputePipeline(nullptr, pipelineCreateInfo).value;
+    computePipeline = device.createComputePipeline(nullptr, pipelineCreateInfo).value;
 
     device.destroyShaderModule(computeShaderModule);
+}
+
+void Vulkan::createRTPipeline() {
+
 }
 
 std::vector<char> Vulkan::readBinaryFile(const std::string &path) {
@@ -425,10 +547,11 @@ void Vulkan::createCommandBuffer() {
     vk::CommandBufferBeginInfo beginInfo = {};
     commandBuffer.begin(&beginInfo);
 
-    commandBuffer.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline);
+    commandBuffer.bindPipeline(vk::PipelineBindPoint::eCompute, computePipeline);
 
-    std::vector<vk::DescriptorSet> descriptorSets = {descriptorSet};
-    commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eCompute, pipelineLayout, 0, descriptorSets, nullptr);
+    std::vector<vk::DescriptorSet> descriptorSets = {computeDescriptorSet};
+    commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eCompute, computePipelineLayout, 0, descriptorSets,
+                                     nullptr);
 
     // RENDER TARGET IMAGE: UNDEFINED -> GENERAL
     vk::ImageMemoryBarrier barrierRenderTargetToGeneral = getImagePipelineBarrier(
