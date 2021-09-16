@@ -8,6 +8,12 @@
 #include <vkfw/vkfw.hpp>
 #include "vulkan_settings.h"
 
+struct VulkanImage {
+    vk::Image image;
+    vk::DeviceMemory memory;
+    vk::ImageView imageView;
+};
+
 class Vulkan {
 public:
     Vulkan(VulkanSettings settings);
@@ -75,6 +81,8 @@ private:
     vk::Fence fence;
     vk::Semaphore semaphore;
 
+    VulkanImage renderTargetImage;
+
     void createWindow();
 
     void createInstance();
@@ -111,11 +119,17 @@ private:
 
     void createSemaphore();
 
+    void createRenderTargetImage();
+
     [[nodiscard]] uint32_t findMemoryTypeIndex(const uint32_t &memoryTypeBits,
                                                const vk::MemoryPropertyFlags &properties);
 
     [[nodiscard]] vk::ImageMemoryBarrier getImagePipelineBarrier(
             const vk::AccessFlagBits &srcAccessFlags, const vk::AccessFlagBits &dstAccessFlags,
             const vk::ImageLayout &oldLayout, const vk::ImageLayout &newLayout, const vk::Image &image) const;
+
+    [[nodiscard]] VulkanImage createImage(const vk::Format &format, const vk::Flags<vk::ImageUsageFlagBits> usageFlagBits);
+
+    void destroyImage(const VulkanImage &image) const;
 
 };

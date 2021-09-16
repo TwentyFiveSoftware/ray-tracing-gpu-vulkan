@@ -16,6 +16,7 @@ Vulkan::Vulkan(VulkanSettings settings) :
     createLogicalDevice();
     createCommandPool();
     createSwapChain();
+    createRenderTargetImage();
     createDescriptorSetLayout();
     createDescriptorPool();
     createDescriptorSet();
@@ -36,6 +37,7 @@ Vulkan::~Vulkan() {
     device.destroyImageView(swapChainImageView);
     device.destroySwapchainKHR(swapChain);
     device.destroyCommandPool(commandPool);
+    destroyImage(renderTargetImage);
     device.destroy();
     instance.destroySurfaceKHR(surface);
     instance.destroy();
@@ -264,7 +266,7 @@ void Vulkan::createSwapChain() {
             .imageColorSpace = colorSpace,
             .imageExtent = {.width = settings.windowWidth, .height = settings.windowHeight},
             .imageArrayLayers = 1,
-            .imageUsage = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eStorage,
+            .imageUsage = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransferDst,
             .imageSharingMode = vk::SharingMode::eExclusive,
             .preTransform = physicalDevice.getSurfaceCapabilitiesKHR(surface).currentTransform,
             .compositeAlpha = vk::CompositeAlphaFlagBitsKHR::eOpaque,
@@ -340,7 +342,7 @@ void Vulkan::createDescriptorSet() {
 
 
     vk::DescriptorImageInfo renderTargetImageInfo = {
-            .imageView = swapChainImageView,
+            .imageView = renderTargetImage.imageView,
             .imageLayout = vk::ImageLayout::eGeneral
     };
 
@@ -428,26 +430,72 @@ void Vulkan::createCommandBuffer() {
     std::vector<vk::DescriptorSet> descriptorSets = {descriptorSet};
     commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eCompute, pipelineLayout, 0, descriptorSets, nullptr);
 
-
-    vk::ImageMemoryBarrier imageBarrierToGeneral = getImagePipelineBarrier(
+    // RENDER TARGET IMAGE: UNDEFINED -> GENERAL
+    vk::ImageMemoryBarrier barrierRenderTargetToGeneral = getImagePipelineBarrier(
             vk::AccessFlagBits::eNoneKHR, vk::AccessFlagBits::eShaderWrite,
-            vk::ImageLayout::eUndefined, vk::ImageLayout::eGeneral, swapChainImage);
+            vk::ImageLayout::eUndefined, vk::ImageLayout::eGeneral, renderTargetImage.image);
 
     commandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader,
                                   vk::DependencyFlagBits::eByRegion, 0, nullptr,
-                                  0, nullptr, 1, &imageBarrierToGeneral);
+                                  0, nullptr, 1, &barrierRenderTargetToGeneral);
 
+
+    // RENDER TO RENDER TARGET IMAGE
     commandBuffer.dispatch(
             static_cast<uint32_t>(std::ceil(float(settings.windowWidth) / 16.0f)),
             static_cast<uint32_t>(std::ceil(float(settings.windowHeight) / 16.0f)),
             1);
 
-    vk::ImageMemoryBarrier imageBarrierToPresent = getImagePipelineBarrier(
-            vk::AccessFlagBits::eShaderWrite, vk::AccessFlagBits::eMemoryRead,
-            vk::ImageLayout::eGeneral, vk::ImageLayout::ePresentSrcKHR, swapChainImage);
-    commandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eBottomOfPipe,
+
+    // RENDER TARGET IMAGE: GENERAL -> TRANSFER SRC
+    vk::ImageMemoryBarrier barrierRenderTargetToTransferSrc = getImagePipelineBarrier(
+            vk::AccessFlagBits::eShaderWrite, vk::AccessFlagBits::eTransferRead,
+            vk::ImageLayout::eGeneral, vk::ImageLayout::eTransferSrcOptimal, renderTargetImage.image);
+
+    // SWAP CHAIN IMAGE: UNDEFINED -> TRANSFER DST
+    vk::ImageMemoryBarrier barrierSwapChainToTransferDst = getImagePipelineBarrier(
+            vk::AccessFlagBits::eNoneKHR, vk::AccessFlagBits::eTransferWrite,
+            vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal, swapChainImage);
+
+    vk::ImageMemoryBarrier barriers[2] = {barrierRenderTargetToTransferSrc, barrierSwapChainToTransferDst};
+
+    commandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eTransfer,
                                   vk::DependencyFlagBits::eByRegion, 0, nullptr,
-                                  0, nullptr, 1, &imageBarrierToPresent);
+                                  0, nullptr, 2, barriers);
+
+
+    // COPY RENDER TARGET IMAGE TO SWAP CHAIN IMAGE
+    vk::ImageSubresourceLayers subresourceLayers = {
+            .aspectMask = vk::ImageAspectFlagBits::eColor,
+            .mipLevel = 0,
+            .baseArrayLayer = 0,
+            .layerCount = 1
+    };
+
+    vk::ImageCopy imageCopy = {
+            .srcSubresource = subresourceLayers,
+            .srcOffset = {0, 0, 0},
+            .dstSubresource = subresourceLayers,
+            .dstOffset = {0, 0, 0},
+            .extent = {
+                    .width = settings.windowWidth,
+                    .height = settings.windowHeight,
+                    .depth = 1
+            }
+    };
+
+    commandBuffer.copyImage(renderTargetImage.image, vk::ImageLayout::eTransferSrcOptimal, swapChainImage,
+                            vk::ImageLayout::eTransferDstOptimal, 1, &imageCopy);
+
+
+    // SWAP CHAIN IMAGE: TRANSFER DST -> PRESENT
+    vk::ImageMemoryBarrier barrierSwapChainToPresent = getImagePipelineBarrier(
+            vk::AccessFlagBits::eTransferWrite, vk::AccessFlagBits::eMemoryRead,
+            vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::ePresentSrcKHR, swapChainImage);
+
+    commandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eTransfer,
+                                  vk::DependencyFlagBits::eByRegion, 0, nullptr,
+                                  0, nullptr, 1, &barrierSwapChainToPresent);
 
     commandBuffer.end();
 }
@@ -493,4 +541,50 @@ vk::ImageMemoryBarrier Vulkan::getImagePipelineBarrier(
                     .layerCount = 1
             },
     };
+}
+
+VulkanImage Vulkan::createImage(const vk::Format &format, const vk::Flags<vk::ImageUsageFlagBits> usageFlagBits) {
+    vk::ImageCreateInfo imageCreateInfo = {
+            .imageType = vk::ImageType::e2D,
+            .format = format,
+            .extent = {.width = settings.windowWidth, .height = settings.windowHeight, .depth = 1},
+            .mipLevels = 1,
+            .arrayLayers = 1,
+            .samples = vk::SampleCountFlagBits::e1,
+            .tiling = vk::ImageTiling::eOptimal,
+            .usage = usageFlagBits,
+            .sharingMode = vk::SharingMode::eExclusive,
+            .initialLayout = vk::ImageLayout::eUndefined
+    };
+
+    vk::Image image = device.createImage(imageCreateInfo);
+
+    vk::MemoryRequirements memoryRequirements = device.getImageMemoryRequirements(image);
+
+    vk::MemoryAllocateInfo allocateInfo = {
+            .allocationSize = memoryRequirements.size,
+            .memoryTypeIndex = findMemoryTypeIndex(memoryRequirements.memoryTypeBits,
+                                                   vk::MemoryPropertyFlagBits::eDeviceLocal)
+    };
+
+    vk::DeviceMemory memory = device.allocateMemory(allocateInfo);
+
+    device.bindImageMemory(image, memory, 0);
+
+    return {
+            .image = image,
+            .memory = memory,
+            .imageView = createImageView(image, format)
+    };
+}
+
+void Vulkan::createRenderTargetImage() {
+    renderTargetImage = createImage(swapChainImageFormat,
+                                    vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferSrc);
+}
+
+void Vulkan::destroyImage(const VulkanImage &image) const {
+    device.destroyImageView(image.imageView);
+    device.destroyImage(image.image);
+    device.freeMemory(image.memory);
 }
