@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(RayTracingGPU)
+project(RayTracingGPUVulkan)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup")
@@ -7,6 +7,9 @@ set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} /SUBSYSTEM:WINDOWS /ENTRY:
 include_directories(
         lib/glm
         lib/stb
+        lib/VulkanSDK/1.2.182.0/Include
+        lib/glfw-3.3.4.bin.WIN64/include
+        lib/vkfw/include
 )
 
 link_directories(
@@ -14,6 +17,12 @@ link_directories(
         lib/VulkanSDK/1.2.182.0/Lib
 )
 
-add_executable(RayTracingGPUVulkan src/main.cpp)
+add_executable(
+        RayTracingGPUVulkan
+        src/main.cpp
+        src/vulkan_settings.h
+        src/vulkan.h
+        src/vulkan.cpp
+)
 
 target_link_libraries(RayTracingGPUVulkan glfw3.lib vulkan-1.lib)

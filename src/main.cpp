@@ -1,6 +1,19 @@
-#include <iostream>
+#include <chrono>
+#include <thread>
+#include "vulkan.h"
 
 int main() {
-    std::cout << "Hello World!" << std::endl;
-    return 0;
+    VulkanSettings settings = {
+            .windowWidth = 1200,
+            .windowHeight = 675
+    };
+
+    Vulkan vulkan(settings);
+
+    vulkan.render();
+
+    while (!vulkan.shouldExit()) {
+        vulkan.update();
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
 }
