@@ -27,8 +27,25 @@ private:
     const vk::Format swapChainImageFormat = vk::Format::eR8G8B8A8Unorm;
     const vk::ColorSpaceKHR colorSpace = vk::ColorSpaceKHR::eSrgbNonlinear;
     const vk::PresentModeKHR presentMode = vk::PresentModeKHR::eImmediate;
+
+    const std::vector<const char*> requiredInstanceExtensions = {
+            VK_EXT_DEBUG_UTILS_EXTENSION_NAME,
+            VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME,
+    };
+
     const std::vector<const char*> requiredDeviceExtensions = {
-            VK_KHR_SWAPCHAIN_EXTENSION_NAME
+            VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+            VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME,
+            VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
+            VK_KHR_SPIRV_1_4_EXTENSION_NAME,
+            VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME,
+            VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME,
+            VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME,
+            VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME,
+            VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,
+            VK_KHR_PIPELINE_LIBRARY_EXTENSION_NAME,
+            VK_KHR_MAINTENANCE3_EXTENSION_NAME,
+            VK_KHR_MAINTENANCE1_EXTENSION_NAME,
     };
 
     vkfw::Window window;
@@ -37,8 +54,8 @@ private:
     vk::PhysicalDevice physicalDevice;
     vk::Device device;
 
-    uint32_t computeQueueFamily = 0, presentQueueFamily = 0;
-    vk::Queue computeQueue, presentQueue;
+    uint32_t graphicsQueueFamily = 0, computeQueueFamily = 0;
+    vk::Queue graphicsQueue, computeQueue;
 
     vk::CommandPool commandPool;
 

@@ -70,7 +70,7 @@ void Vulkan::render() {
             .pImageIndices = &swapChainImageIndex
     };
 
-    presentQueue.presentKHR(presentInfo);
+    graphicsQueue.presentKHR(presentInfo);
 }
 
 bool Vulkan::shouldExit() const {
@@ -110,7 +110,12 @@ void Vulkan::createInstance() {
             .apiVersion = VK_API_VERSION_1_2
     };
 
-    auto enabledExtensions = vkfw::getRequiredInstanceExtensions();
+    std::vector<const char*> enabledExtensions;
+    enabledExtensions.insert(enabledExtensions.end(), vkfw::getRequiredInstanceExtensions().begin(),
+                             vkfw::getRequiredInstanceExtensions().end());
+    enabledExtensions.insert(enabledExtensions.end(), requiredInstanceExtensions.begin(),
+                             requiredInstanceExtensions.end());
+
     std::vector<const char*> enabledLayers =
             {"VK_LAYER_KHRONOS_validation", "VK_LAYER_LUNARG_monitor", "VK_LAYER_KHRONOS_synchronization2"};
 
@@ -170,7 +175,7 @@ void Vulkan::findQueueFamilies() {
     std::vector<vk::QueueFamilyProperties> queueFamilies = physicalDevice.getQueueFamilyProperties();
 
     bool computeFamilyFound = false;
-    bool presentFamilyFound = false;
+    bool graphicsFamilyFound = false;
 
     for (uint32_t i = 0; i < queueFamilies.size(); i++) {
         bool supportsGraphics = (queueFamilies[i].queueFlags & vk::QueueFlagBits::eGraphics)
@@ -185,12 +190,12 @@ void Vulkan::findQueueFamilies() {
             continue;
         }
 
-        if (supportsPresenting && !presentFamilyFound) {
-            presentQueueFamily = i;
-            presentFamilyFound = true;
+        if (supportsGraphics && supportsPresenting && !graphicsFamilyFound) {
+            graphicsQueueFamily = i;
+            graphicsFamilyFound = true;
         }
 
-        if (computeFamilyFound && presentFamilyFound)
+        if (computeFamilyFound && graphicsFamilyFound)
             break;
     }
 }
@@ -199,12 +204,12 @@ void Vulkan::createLogicalDevice() {
     float queuePriority = 1.0f;
     std::vector<vk::DeviceQueueCreateInfo> queueCreateInfos = {
             {
-                    .queueFamilyIndex = computeQueueFamily,
+                    .queueFamilyIndex = graphicsQueueFamily,
                     .queueCount = 1,
                     .pQueuePriorities = &queuePriority
             },
             {
-                    .queueFamilyIndex = presentQueueFamily,
+                    .queueFamilyIndex = computeQueueFamily,
                     .queueCount = 1,
                     .pQueuePriorities = &queuePriority
             }
@@ -212,7 +217,28 @@ void Vulkan::createLogicalDevice() {
 
     vk::PhysicalDeviceFeatures deviceFeatures = {};
 
+    vk::PhysicalDeviceBufferDeviceAddressFeatures bufferDeviceAddressFeatures = {
+            .bufferDeviceAddress = true,
+            .bufferDeviceAddressCaptureReplay = false,
+            .bufferDeviceAddressMultiDevice = false
+    };
+
+    vk::PhysicalDeviceRayTracingPipelineFeaturesKHR rayTracingPipelineFeatures = {
+            .pNext = &bufferDeviceAddressFeatures,
+            .rayTracingPipeline = true
+    };
+
+    vk::PhysicalDeviceAccelerationStructureFeaturesKHR accelerationStructureFeatures = {
+            .pNext = &rayTracingPipelineFeatures,
+            .accelerationStructure = true,
+            .accelerationStructureCaptureReplay = true,
+            .accelerationStructureIndirectBuild = false,
+            .accelerationStructureHostCommands = false,
+            .descriptorBindingAccelerationStructureUpdateAfterBind = false
+    };
+
     vk::DeviceCreateInfo deviceCreateInfo = {
+            .pNext = &accelerationStructureFeatures,
             .queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size()),
             .pQueueCreateInfos = queueCreateInfos.data(),
             .enabledExtensionCount = static_cast<uint32_t>(requiredDeviceExtensions.size()),
@@ -222,8 +248,8 @@ void Vulkan::createLogicalDevice() {
 
     device = physicalDevice.createDevice(deviceCreateInfo);
 
+    graphicsQueue = device.getQueue(graphicsQueueFamily, 0);
     computeQueue = device.getQueue(computeQueueFamily, 0);
-    presentQueue = device.getQueue(presentQueueFamily, 0);
 }
 
 void Vulkan::createCommandPool() {
