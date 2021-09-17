@@ -454,7 +454,7 @@ void Vulkan::createDescriptorSet() {
 
         vk::WriteDescriptorSetAccelerationStructureKHR accelerationStructureInfo = {
                 .accelerationStructureCount = 1,
-//                .pAccelerationStructures =
+                .pAccelerationStructures = &topAccelerationStructure.accelerationStructure
         };
 
         std::vector<vk::WriteDescriptorSet> descriptorWrites = {
@@ -476,8 +476,8 @@ void Vulkan::createDescriptorSet() {
                 }
         };
 
-//        device.updateDescriptorSets(static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data(),
-//                                    0, nullptr);
+        device.updateDescriptorSets(static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data(),
+                                    0, nullptr);
     }
 
 }
@@ -501,14 +501,7 @@ void Vulkan::createPipelineLayout() {
 }
 
 void Vulkan::createComputePipeline() {
-    std::vector<char> computeShaderCode = readBinaryFile("shader.comp.spv");
-
-    vk::ShaderModuleCreateInfo shaderModuleCreateInfo = {
-            .codeSize = computeShaderCode.size(),
-            .pCode = reinterpret_cast<const uint32_t*>(computeShaderCode.data())
-    };
-
-    vk::ShaderModule computeShaderModule = device.createShaderModule(shaderModuleCreateInfo);
+    vk::ShaderModule computeShaderModule = createShaderModule("shader.comp.spv");
 
     vk::PipelineShaderStageCreateInfo shaderStage = {
             .stage = vk::ShaderStageFlagBits::eCompute,
@@ -527,7 +520,80 @@ void Vulkan::createComputePipeline() {
 }
 
 void Vulkan::createRTPipeline() {
+    vk::ShaderModule raygenModule = createShaderModule("shader.rgen.spv");
+    vk::ShaderModule intModule = createShaderModule("shader.rint.spv");
+    vk::ShaderModule chitModule = createShaderModule("shader.rchit.spv");
+    vk::ShaderModule missModule = createShaderModule("shader.rmiss.spv");
 
+    std::vector<vk::PipelineShaderStageCreateInfo> stages = {
+            {
+                    .stage = vk::ShaderStageFlagBits::eRaygenKHR,
+                    .module = raygenModule,
+                    .pName = "main"
+            },
+            {
+                    .stage = vk::ShaderStageFlagBits::eIntersectionKHR,
+                    .module = intModule,
+                    .pName = "main"
+            },
+            {
+                    .stage = vk::ShaderStageFlagBits::eClosestHitKHR,
+                    .module = chitModule,
+                    .pName = "main"
+            },
+            {
+                    .stage = vk::ShaderStageFlagBits::eMissKHR,
+                    .module = missModule,
+                    .pName = "main"
+            }
+    };
+
+    std::vector<vk::RayTracingShaderGroupCreateInfoKHR> groups = {
+            {
+                    .type = vk::RayTracingShaderGroupTypeKHR::eGeneral,
+                    .generalShader = 0,
+                    .closestHitShader = VK_SHADER_UNUSED_KHR,
+                    .anyHitShader = VK_SHADER_UNUSED_KHR,
+                    .intersectionShader = VK_SHADER_UNUSED_KHR
+            },
+            {
+                    .type = vk::RayTracingShaderGroupTypeKHR::eProceduralHitGroup,
+                    .generalShader = VK_SHADER_UNUSED_KHR,
+                    .closestHitShader = 2,
+                    .anyHitShader = VK_SHADER_UNUSED_KHR,
+                    .intersectionShader = 1
+            },
+            {
+                    .type = vk::RayTracingShaderGroupTypeKHR::eGeneral,
+                    .generalShader = 3,
+                    .closestHitShader = VK_SHADER_UNUSED_KHR,
+                    .anyHitShader = VK_SHADER_UNUSED_KHR,
+                    .intersectionShader = VK_SHADER_UNUSED_KHR
+            }
+    };
+
+    vk::PipelineLibraryCreateInfoKHR libraryCreateInfo = {.libraryCount = 0};
+
+    vk::RayTracingPipelineCreateInfoKHR pipelineCreateInfo = {
+            .stageCount = static_cast<uint32_t>(stages.size()),
+            .pStages = stages.data(),
+            .groupCount = static_cast<uint32_t>(groups.size()),
+            .pGroups = groups.data(),
+            .maxPipelineRayRecursionDepth = 1,
+            .pLibraryInfo = &libraryCreateInfo,
+            .pLibraryInterface = nullptr,
+            .layout = rtPipelineLayout,
+            .basePipelineHandle = VK_NULL_HANDLE,
+            .basePipelineIndex = 0
+    };
+
+    rtPipeline = device.createRayTracingPipelineKHR(nullptr, nullptr, pipelineCreateInfo,
+                                                    nullptr, dynamicDispatchLoader).value;
+
+    device.destroyShaderModule(raygenModule);
+    device.destroyShaderModule(chitModule);
+    device.destroyShaderModule(missModule);
+    device.destroyShaderModule(intModule);
 }
 
 std::vector<char> Vulkan::readBinaryFile(const std::string &path) {
@@ -989,4 +1055,15 @@ void Vulkan::destroyAccelerationStructure(const VulkanAccelerationStructure &acc
     destroyBuffer(accelerationStructure.structureBuffer);
     destroyBuffer(accelerationStructure.scratchBuffer);
     destroyBuffer(accelerationStructure.instancesBuffer);
+}
+
+vk::ShaderModule Vulkan::createShaderModule(const std::string &path) const {
+    std::vector<char> shaderCode = readBinaryFile(path);
+
+    vk::ShaderModuleCreateInfo shaderModuleCreateInfo = {
+            .codeSize = shaderCode.size(),
+            .pCode = reinterpret_cast<const uint32_t*>(shaderCode.data())
+    };
+
+    return device.createShaderModule(shaderModuleCreateInfo);
 }

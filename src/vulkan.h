@@ -196,4 +196,6 @@ private:
 
     void destroyAccelerationStructure(const VulkanAccelerationStructure &accelerationStructure);
 
+    [[nodiscard]] vk::ShaderModule createShaderModule(const std::string &path) const;
+
 };
