@@ -14,9 +14,15 @@ Vulkan::Vulkan(VulkanSettings settings) :
     pickPhysicalDevice();
     findQueueFamilies();
     createLogicalDevice();
+
+    dynamicDispatchLoader = vk::DispatchLoaderDynamic(instance, vkGetInstanceProcAddr, device);
+
     createCommandPool();
     createSwapChain();
     createRenderTargetImage();
+    createSphereBuffer();
+    createBottomAccelerationStructure();
+    createTopAccelerationStructure();
     createDescriptorSetLayout();
     createDescriptorPool();
     createDescriptorSet();
@@ -40,6 +46,12 @@ Vulkan::~Vulkan() {
     device.destroyDescriptorSetLayout(rtDescriptorSetLayout);
     device.destroyDescriptorPool(computeDescriptorPool);
     device.destroyDescriptorPool(rtDescriptorPool);
+
+    device.destroyAccelerationStructureKHR(accelerationStructure, nullptr, dynamicDispatchLoader);
+
+    destroyBuffer(accelerationStructureBuffer);
+    destroyBuffer(scratchBuffer);
+    destroyBuffer(sphereBuffer);
 
     device.destroyImageView(swapChainImageView);
     device.destroySwapchainKHR(swapChain);
@@ -666,7 +678,7 @@ vk::ImageMemoryBarrier Vulkan::getImagePipelineBarrier(
     };
 }
 
-VulkanImage Vulkan::createImage(const vk::Format &format, const vk::Flags<vk::ImageUsageFlagBits> usageFlagBits) {
+VulkanImage Vulkan::createImage(const vk::Format &format, const vk::Flags<vk::ImageUsageFlagBits> &usageFlagBits) {
     vk::ImageCreateInfo imageCreateInfo = {
             .imageType = vk::ImageType::e2D,
             .format = format,
@@ -710,4 +722,160 @@ void Vulkan::destroyImage(const VulkanImage &image) const {
     device.destroyImageView(image.imageView);
     device.destroyImage(image.image);
     device.freeMemory(image.memory);
+}
+
+VulkanBuffer Vulkan::createBuffer(const vk::DeviceSize &size, const vk::Flags<vk::BufferUsageFlagBits> &usage,
+                                  const vk::Flags<vk::MemoryPropertyFlagBits> &memoryProperty) {
+    vk::BufferCreateInfo bufferCreateInfo = {
+            .size = size,
+            .usage = usage,
+            .sharingMode = vk::SharingMode::eExclusive
+    };
+
+    vk::Buffer buffer = device.createBuffer(bufferCreateInfo);
+
+    vk::MemoryRequirements memoryRequirements = device.getBufferMemoryRequirements(buffer);
+
+    vk::MemoryAllocateFlagsInfo allocateFlagsInfo = {
+            .flags = vk::MemoryAllocateFlagBits::eDeviceAddress
+    };
+
+    vk::MemoryAllocateInfo allocateInfo = {
+            .pNext = &allocateFlagsInfo,
+            .allocationSize = memoryRequirements.size,
+            .memoryTypeIndex = findMemoryTypeIndex(memoryRequirements.memoryTypeBits, memoryProperty)
+    };
+
+    vk::DeviceMemory memory = device.allocateMemory(allocateInfo);
+
+    device.bindBufferMemory(buffer, memory, 0);
+
+    return {
+            .buffer = buffer,
+            .memory = memory,
+    };
+}
+
+void Vulkan::destroyBuffer(const VulkanBuffer &buffer) const {
+    device.destroyBuffer(buffer.buffer);
+    device.freeMemory(buffer.memory);
+}
+
+void Vulkan::executeSingleTimeCommand(const std::function<void(const vk::CommandBuffer &singleTimeCommandBuffer)> &c) {
+    vk::CommandBuffer singleTimeCommandBuffer = device.allocateCommandBuffers(
+            {
+                    .commandPool = commandPool,
+                    .level = vk::CommandBufferLevel::ePrimary,
+                    .commandBufferCount = 1
+            }).front();
+
+    vk::CommandBufferBeginInfo beginInfo = {
+            .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit
+    };
+
+    singleTimeCommandBuffer.begin(&beginInfo);
+
+    c(singleTimeCommandBuffer);
+
+    singleTimeCommandBuffer.end();
+
+
+    vk::SubmitInfo submitInfo = {
+            .commandBufferCount = 1,
+            .pCommandBuffers = &singleTimeCommandBuffer
+    };
+
+    vk::Fence f = device.createFence({});
+    computeQueue.submit(1, &submitInfo, f);
+    device.waitForFences(1, &f, true, UINT64_MAX);
+
+    device.destroyFence(f);
+    device.freeCommandBuffers(commandPool, singleTimeCommandBuffer);
+}
+
+void Vulkan::createSphereBuffer() {
+    sphereBuffer = createBuffer(sizeof(SpherePrimitive) * spheres.size(),
+                                vk::BufferUsageFlagBits::eAccelerationStructureBuildInputReadOnlyKHR |
+                                vk::BufferUsageFlagBits::eShaderDeviceAddress,
+                                vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent |
+                                vk::MemoryPropertyFlagBits::eDeviceLocal);
+}
+
+void Vulkan::createBottomAccelerationStructure() {
+    // ACCELERATION STRUCTURE META INFO
+    vk::AccelerationStructureGeometryKHR geometry = {
+            .geometryType = vk::GeometryTypeKHR::eAabbs,
+            .flags = vk::GeometryFlagBitsKHR::eOpaque,
+    };
+
+    geometry.geometry.aabbs.sType = vk::StructureType::eAccelerationStructureGeometryAabbsDataKHR;
+
+    vk::AccelerationStructureGeometryAabbsDataKHR geometryAABBsData = geometry.geometry.aabbs;
+    geometryAABBsData.stride = sizeof(SpherePrimitive);
+    geometryAABBsData.data.deviceAddress = device.getBufferAddress({.buffer = sphereBuffer.buffer})
+                                           + offsetof(SpherePrimitive, bbox);
+
+
+    vk::AccelerationStructureBuildGeometryInfoKHR buildInfo = {
+            .type = vk::AccelerationStructureTypeKHR::eBottomLevel,
+            .flags = vk::BuildAccelerationStructureFlagBitsKHR::ePreferFastTrace,
+            .mode = vk::BuildAccelerationStructureModeKHR::eBuild,
+            .srcAccelerationStructure = nullptr,
+            .dstAccelerationStructure = nullptr,
+            .geometryCount = 1,
+            .pGeometries = &geometry,
+            .scratchData = {}
+    };
+
+
+    // CALCULATE REQUIRED SIZE FOR THE ACCELERATION STRUCTURE
+    std::vector<uint32_t> maxPrimitiveCounts = {static_cast<uint32_t>(spheres.size())};
+
+    vk::AccelerationStructureBuildSizesInfoKHR buildSizesInfo = device.getAccelerationStructureBuildSizesKHR(
+            vk::AccelerationStructureBuildTypeKHR::eDevice, buildInfo, maxPrimitiveCounts, dynamicDispatchLoader);
+
+
+    // ALLOCATE BUFFERS FOR ACCELERATION STRUCTURE
+    accelerationStructureBuffer = createBuffer(buildSizesInfo.accelerationStructureSize,
+                                               vk::BufferUsageFlagBits::eAccelerationStructureStorageKHR,
+                                               vk::MemoryPropertyFlagBits::eDeviceLocal);
+
+    scratchBuffer = createBuffer(buildSizesInfo.buildScratchSize,
+                                 vk::BufferUsageFlagBits::eStorageBuffer |
+                                 vk::BufferUsageFlagBits::eShaderDeviceAddress,
+                                 vk::MemoryPropertyFlagBits::eDeviceLocal);
+
+    // CREATE THE ACCELERATION STRUCTURE
+    vk::AccelerationStructureCreateInfoKHR createInfo = {
+            .buffer = accelerationStructureBuffer.buffer,
+            .offset = 0,
+            .size = buildSizesInfo.accelerationStructureSize,
+            .type = vk::AccelerationStructureTypeKHR::eBottomLevel
+    };
+
+    accelerationStructure = device.createAccelerationStructureKHR(createInfo, nullptr, dynamicDispatchLoader);
+
+
+    // FILL IN THE REMAINING META INFO
+    buildInfo.dstAccelerationStructure = accelerationStructure;
+    buildInfo.scratchData.deviceAddress = device.getBufferAddress({.buffer = scratchBuffer.buffer});
+
+
+    // BUILD THE ACCELERATION STRUCTURE
+    vk::AccelerationStructureBuildRangeInfoKHR buildRangeInfo = {
+            .primitiveCount = static_cast<uint32_t>(spheres.size()),
+            .primitiveOffset = 0,
+            .firstVertex = 0,
+            .transformOffset = 0
+    };
+
+    const vk::AccelerationStructureBuildRangeInfoKHR* pBuildRangeInfos[] = {&buildRangeInfo};
+
+    executeSingleTimeCommand([&](const vk::CommandBuffer &singleTimeCommandBuffer) {
+        singleTimeCommandBuffer.buildAccelerationStructuresKHR(1, &buildInfo, pBuildRangeInfos, dynamicDispatchLoader);
+    });
+}
+
+void Vulkan::createTopAccelerationStructure() {
+
 }
