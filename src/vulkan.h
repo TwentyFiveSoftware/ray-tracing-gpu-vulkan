@@ -20,6 +20,13 @@ struct VulkanBuffer {
     vk::DeviceMemory memory;
 };
 
+struct VulkanAccelerationStructure {
+    vk::AccelerationStructureKHR accelerationStructure;
+    VulkanBuffer structureBuffer;
+    VulkanBuffer scratchBuffer;
+    VulkanBuffer instancesBuffer;
+};
+
 // ---- TODO: MOVE!
 #include <glm/glm.hpp>
 
@@ -117,11 +124,10 @@ private:
 
     VulkanImage renderTargetImage;
 
-    VulkanBuffer accelerationStructureBuffer;
-    VulkanBuffer scratchBuffer;
     VulkanBuffer sphereBuffer;
 
-    vk::AccelerationStructureKHR accelerationStructure;
+    VulkanAccelerationStructure bottomAccelerationStructure;
+    VulkanAccelerationStructure topAccelerationStructure;
 
     void createWindow();
 
@@ -187,5 +193,7 @@ private:
     void createBottomAccelerationStructure();
 
     void createTopAccelerationStructure();
+
+    void destroyAccelerationStructure(const VulkanAccelerationStructure &accelerationStructure);
 
 };

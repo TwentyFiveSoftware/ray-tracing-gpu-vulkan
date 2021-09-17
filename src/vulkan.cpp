@@ -47,10 +47,9 @@ Vulkan::~Vulkan() {
     device.destroyDescriptorPool(computeDescriptorPool);
     device.destroyDescriptorPool(rtDescriptorPool);
 
-    device.destroyAccelerationStructureKHR(accelerationStructure, nullptr, dynamicDispatchLoader);
+    destroyAccelerationStructure(topAccelerationStructure);
+    destroyAccelerationStructure(bottomAccelerationStructure);
 
-    destroyBuffer(accelerationStructureBuffer);
-    destroyBuffer(scratchBuffer);
     destroyBuffer(sphereBuffer);
 
     device.destroyImageView(swapChainImageView);
@@ -805,7 +804,7 @@ void Vulkan::createBottomAccelerationStructure() {
     // ACCELERATION STRUCTURE META INFO
     vk::AccelerationStructureGeometryKHR geometry = {
             .geometryType = vk::GeometryTypeKHR::eAabbs,
-            .flags = vk::GeometryFlagBitsKHR::eOpaque,
+            .flags = vk::GeometryFlagBitsKHR::eOpaque
     };
 
     geometry.geometry.aabbs.sType = vk::StructureType::eAccelerationStructureGeometryAabbsDataKHR;
@@ -836,29 +835,31 @@ void Vulkan::createBottomAccelerationStructure() {
 
 
     // ALLOCATE BUFFERS FOR ACCELERATION STRUCTURE
-    accelerationStructureBuffer = createBuffer(buildSizesInfo.accelerationStructureSize,
-                                               vk::BufferUsageFlagBits::eAccelerationStructureStorageKHR,
-                                               vk::MemoryPropertyFlagBits::eDeviceLocal);
+    bottomAccelerationStructure.structureBuffer = createBuffer(buildSizesInfo.accelerationStructureSize,
+                                                               vk::BufferUsageFlagBits::eAccelerationStructureStorageKHR,
+                                                               vk::MemoryPropertyFlagBits::eDeviceLocal);
 
-    scratchBuffer = createBuffer(buildSizesInfo.buildScratchSize,
-                                 vk::BufferUsageFlagBits::eStorageBuffer |
-                                 vk::BufferUsageFlagBits::eShaderDeviceAddress,
-                                 vk::MemoryPropertyFlagBits::eDeviceLocal);
+    bottomAccelerationStructure.scratchBuffer = createBuffer(buildSizesInfo.buildScratchSize,
+                                                             vk::BufferUsageFlagBits::eStorageBuffer |
+                                                             vk::BufferUsageFlagBits::eShaderDeviceAddress,
+                                                             vk::MemoryPropertyFlagBits::eDeviceLocal);
 
     // CREATE THE ACCELERATION STRUCTURE
     vk::AccelerationStructureCreateInfoKHR createInfo = {
-            .buffer = accelerationStructureBuffer.buffer,
+            .buffer = bottomAccelerationStructure.structureBuffer.buffer,
             .offset = 0,
             .size = buildSizesInfo.accelerationStructureSize,
             .type = vk::AccelerationStructureTypeKHR::eBottomLevel
     };
 
-    accelerationStructure = device.createAccelerationStructureKHR(createInfo, nullptr, dynamicDispatchLoader);
+    bottomAccelerationStructure.accelerationStructure =
+            device.createAccelerationStructureKHR(createInfo, nullptr, dynamicDispatchLoader);
 
 
     // FILL IN THE REMAINING META INFO
-    buildInfo.dstAccelerationStructure = accelerationStructure;
-    buildInfo.scratchData.deviceAddress = device.getBufferAddress({.buffer = scratchBuffer.buffer});
+    buildInfo.dstAccelerationStructure = bottomAccelerationStructure.accelerationStructure;
+    buildInfo.scratchData.deviceAddress =
+            device.getBufferAddress({.buffer = bottomAccelerationStructure.scratchBuffer.buffer});
 
 
     // BUILD THE ACCELERATION STRUCTURE
@@ -877,5 +878,115 @@ void Vulkan::createBottomAccelerationStructure() {
 }
 
 void Vulkan::createTopAccelerationStructure() {
+    // ACCELERATION STRUCTURE META INFO
+    vk::AccelerationStructureGeometryKHR geometry = {
+            .geometryType = vk::GeometryTypeKHR::eInstances,
+            .flags = vk::GeometryFlagBitsKHR::eOpaque
+    };
 
+    geometry.geometry.instances.sType = vk::StructureType::eAccelerationStructureGeometryInstancesDataKHR;
+
+    vk::AccelerationStructureGeometryInstancesDataKHR geometryInstancesData = geometry.geometry.instances;
+    geometryInstancesData.arrayOfPointers = false;
+    geometryInstancesData.data = {};
+
+
+    vk::AccelerationStructureBuildGeometryInfoKHR buildInfo = {
+            .type = vk::AccelerationStructureTypeKHR::eTopLevel,
+            .flags = vk::BuildAccelerationStructureFlagBitsKHR::ePreferFastTrace,
+            .mode = vk::BuildAccelerationStructureModeKHR::eBuild,
+            .srcAccelerationStructure = nullptr,
+            .dstAccelerationStructure = nullptr,
+            .geometryCount = 1,
+            .pGeometries = &geometry,
+            .scratchData = {}
+    };
+
+
+    // CALCULATE REQUIRED SIZE FOR THE ACCELERATION STRUCTURE
+    vk::AccelerationStructureBuildSizesInfoKHR buildSizesInfo = device.getAccelerationStructureBuildSizesKHR(
+            vk::AccelerationStructureBuildTypeKHR::eDevice, buildInfo, {1}, dynamicDispatchLoader);
+
+
+    // ALLOCATE BUFFERS FOR ACCELERATION STRUCTURE
+    topAccelerationStructure.structureBuffer = createBuffer(buildSizesInfo.accelerationStructureSize,
+                                                            vk::BufferUsageFlagBits::eAccelerationStructureStorageKHR,
+                                                            vk::MemoryPropertyFlagBits::eDeviceLocal);
+
+    topAccelerationStructure.scratchBuffer = createBuffer(buildSizesInfo.buildScratchSize,
+                                                          vk::BufferUsageFlagBits::eStorageBuffer |
+                                                          vk::BufferUsageFlagBits::eShaderDeviceAddress,
+                                                          vk::MemoryPropertyFlagBits::eDeviceLocal);
+
+    // CREATE THE ACCELERATION STRUCTURE
+    vk::AccelerationStructureCreateInfoKHR createInfo = {
+            .buffer = topAccelerationStructure.structureBuffer.buffer,
+            .offset = 0,
+            .size = buildSizesInfo.accelerationStructureSize,
+            .type = vk::AccelerationStructureTypeKHR::eTopLevel
+    };
+
+    topAccelerationStructure.accelerationStructure =
+            device.createAccelerationStructureKHR(createInfo, nullptr, dynamicDispatchLoader);
+
+
+    // CREATE INSTANCE INFO & WRITE IN NEW BUFFER
+    std::array<std::array<float, 4>, 3> matrix = {
+            {
+                    {1.0f, 0.0f, 0.0f, 0.0f},
+                    {0.0f, 1.0f, 0.0f, 0.0f},
+                    {0.0f, 0.0f, 1.0f, 0.0f}
+            }};
+
+    vk::AccelerationStructureInstanceKHR accelerationStructureInstance = {
+            .transform = {.matrix = matrix},
+            .mask = 0xFF,
+            .instanceShaderBindingTableRecordOffset = 0,
+            .accelerationStructureReference = device.getAccelerationStructureAddressKHR(
+                    {.accelerationStructure = bottomAccelerationStructure.accelerationStructure},
+                    dynamicDispatchLoader),
+    };
+
+    topAccelerationStructure.instancesBuffer = createBuffer(
+            sizeof(vk::AccelerationStructureInstanceKHR),
+            vk::BufferUsageFlagBits::eAccelerationStructureBuildInputReadOnlyKHR |
+            vk::BufferUsageFlagBits::eShaderDeviceAddress,
+            vk::MemoryPropertyFlagBits::eDeviceLocal | vk::MemoryPropertyFlagBits::eHostCoherent |
+            vk::MemoryPropertyFlagBits::eHostVisible);
+
+    void* pInstancesBuffer = device.mapMemory(topAccelerationStructure.instancesBuffer.memory, 0,
+                                              sizeof(vk::AccelerationStructureInstanceKHR));
+    memcpy(pInstancesBuffer, &accelerationStructureInstance, sizeof(vk::AccelerationStructureInstanceKHR));
+    device.unmapMemory(topAccelerationStructure.instancesBuffer.memory);
+
+
+    // FILL IN THE REMAINING META INFO
+    buildInfo.dstAccelerationStructure = topAccelerationStructure.accelerationStructure;
+    buildInfo.scratchData.deviceAddress = device.getBufferAddress(
+            {.buffer = topAccelerationStructure.scratchBuffer.buffer});
+
+    geometryInstancesData.data.deviceAddress = device.getBufferAddress(
+            {.buffer = topAccelerationStructure.instancesBuffer.buffer});
+
+
+    // BUILD THE ACCELERATION STRUCTURE
+    vk::AccelerationStructureBuildRangeInfoKHR buildRangeInfo = {
+            .primitiveCount = 1,
+            .primitiveOffset = 0,
+            .firstVertex = 0,
+            .transformOffset = 0
+    };
+
+    const vk::AccelerationStructureBuildRangeInfoKHR* pBuildRangeInfos[] = {&buildRangeInfo};
+
+    executeSingleTimeCommand([&](const vk::CommandBuffer &singleTimeCommandBuffer) {
+        singleTimeCommandBuffer.buildAccelerationStructuresKHR(1, &buildInfo, pBuildRangeInfos, dynamicDispatchLoader);
+    });
+}
+
+void Vulkan::destroyAccelerationStructure(const VulkanAccelerationStructure &accelerationStructure) {
+    device.destroyAccelerationStructureKHR(accelerationStructure.accelerationStructure, nullptr, dynamicDispatchLoader);
+    destroyBuffer(accelerationStructure.structureBuffer);
+    destroyBuffer(accelerationStructure.scratchBuffer);
+    destroyBuffer(accelerationStructure.instancesBuffer);
 }
