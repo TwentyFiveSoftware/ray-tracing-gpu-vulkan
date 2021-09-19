@@ -77,10 +77,10 @@ private:
 
     vk::DispatchLoaderDynamic dynamicDispatchLoader;
 
-    uint32_t graphicsQueueFamily = 0, computeQueueFamily = 0;
-    vk::Queue graphicsQueue, computeQueue;
+    uint32_t presentQueueFamily = 0, computeQueueFamily = 0;
+    vk::Queue presentQueue, computeQueue;
 
-    vk::CommandPool computeCommandPool, graphicsCommandPool;
+    vk::CommandPool commandPool;
 
     vk::SwapchainKHR swapChain;
     vk::Image swapChainImage;
@@ -127,7 +127,7 @@ private:
 
     void createLogicalDevice();
 
-    void createCommandPools();
+    void createCommandPool();
 
     void createSwapChain();
 

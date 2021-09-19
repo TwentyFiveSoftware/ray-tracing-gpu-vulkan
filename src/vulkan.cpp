@@ -23,7 +23,7 @@ Vulkan::Vulkan(VulkanSettings settings, Scene scene) :
 
     dynamicDispatchLoader = vk::DispatchLoaderDynamic(instance, vkGetInstanceProcAddr, device);
 
-    createCommandPools();
+    createCommandPool();
     createSwapChain();
     createRenderTargetImage();
 
@@ -69,10 +69,7 @@ Vulkan::~Vulkan() {
 
     device.destroyImageView(swapChainImageView);
     device.destroySwapchainKHR(swapChain);
-
-    device.destroyCommandPool(graphicsCommandPool);
-    device.destroyCommandPool(computeCommandPool);
-
+    device.destroyCommandPool(commandPool);
     destroyImage(renderTargetImage);
     device.destroy();
     instance.destroySurfaceKHR(surface);
@@ -108,7 +105,7 @@ void Vulkan::render() {
             .pImageIndices = &swapChainImageIndex
     };
 
-    graphicsQueue.presentKHR(presentInfo);
+    presentQueue.presentKHR(presentInfo);
 }
 
 bool Vulkan::shouldExit() const {
@@ -213,7 +210,7 @@ void Vulkan::findQueueFamilies() {
     std::vector<vk::QueueFamilyProperties> queueFamilies = physicalDevice.getQueueFamilyProperties();
 
     bool computeFamilyFound = false;
-    bool graphicsFamilyFound = false;
+    bool presentFamilyFound = false;
 
     for (uint32_t i = 0; i < queueFamilies.size(); i++) {
         bool supportsGraphics = (queueFamilies[i].queueFlags & vk::QueueFlagBits::eGraphics)
@@ -228,12 +225,12 @@ void Vulkan::findQueueFamilies() {
             continue;
         }
 
-        if (supportsGraphics && supportsPresenting && !graphicsFamilyFound) {
-            graphicsQueueFamily = i;
-            graphicsFamilyFound = true;
+        if (supportsPresenting && !presentFamilyFound) {
+            presentQueueFamily = i;
+            presentFamilyFound = true;
         }
 
-        if (computeFamilyFound && graphicsFamilyFound)
+        if (computeFamilyFound && presentFamilyFound)
             break;
     }
 }
@@ -242,7 +239,7 @@ void Vulkan::createLogicalDevice() {
     float queuePriority = 1.0f;
     std::vector<vk::DeviceQueueCreateInfo> queueCreateInfos = {
             {
-                    .queueFamilyIndex = graphicsQueueFamily,
+                    .queueFamilyIndex = presentQueueFamily,
                     .queueCount = 1,
                     .pQueuePriorities = &queuePriority
             },
@@ -286,13 +283,12 @@ void Vulkan::createLogicalDevice() {
 
     device = physicalDevice.createDevice(deviceCreateInfo);
 
-    graphicsQueue = device.getQueue(graphicsQueueFamily, 0);
     computeQueue = device.getQueue(computeQueueFamily, 0);
+    presentQueue = device.getQueue(presentQueueFamily, 0);
 }
 
-void Vulkan::createCommandPools() {
-    computeCommandPool = device.createCommandPool({.queueFamilyIndex = computeQueueFamily});
-    graphicsCommandPool = device.createCommandPool({.queueFamilyIndex = graphicsQueueFamily});
+void Vulkan::createCommandPool() {
+    commandPool = device.createCommandPool({.queueFamilyIndex = computeQueueFamily});
 }
 
 void Vulkan::createSwapChain() {
@@ -660,7 +656,7 @@ std::vector<char> Vulkan::readBinaryFile(const std::string &path) {
 void Vulkan::createCommandBuffer() {
     commandBuffer = device.allocateCommandBuffers(
             {
-                    .commandPool = computeCommandPool,
+                    .commandPool = commandPool,
                     .level = vk::CommandBufferLevel::ePrimary,
                     .commandBufferCount = 1
             }).front();
@@ -741,93 +737,6 @@ void Vulkan::createCommandBuffer() {
 
     commandBuffer.end();
 }
-
-//void Vulkan::createCommandBuffer() {
-//    commandBuffer = device.allocateCommandBuffers(
-//            {
-//                    .commandPool = commandPool,
-//                    .level = vk::CommandBufferLevel::ePrimary,
-//                    .commandBufferCount = 1
-//            }).front();
-//
-//    vk::CommandBufferBeginInfo beginInfo = {};
-//    commandBuffer.begin(&beginInfo);
-//
-//    commandBuffer.bindPipeline(vk::PipelineBindPoint::eCompute, computePipeline);
-//
-//    std::vector<vk::DescriptorSet> descriptorSets = {computeDescriptorSet};
-//    commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eCompute, computePipelineLayout, 0, descriptorSets,
-//                                     nullptr);
-//
-//    // RENDER TARGET IMAGE: UNDEFINED -> GENERAL
-//    vk::ImageMemoryBarrier barrierRenderTargetToGeneral = getImagePipelineBarrier(
-//            vk::AccessFlagBits::eNoneKHR, vk::AccessFlagBits::eShaderWrite,
-//            vk::ImageLayout::eUndefined, vk::ImageLayout::eGeneral, renderTargetImage.image);
-//
-//    commandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader,
-//                                  vk::DependencyFlagBits::eByRegion, 0, nullptr,
-//                                  0, nullptr, 1, &barrierRenderTargetToGeneral);
-//
-//
-//    // RENDER TO RENDER TARGET IMAGE
-//    commandBuffer.dispatch(
-//            static_cast<uint32_t>(std::ceil(float(settings.windowWidth) / 16.0f)),
-//            static_cast<uint32_t>(std::ceil(float(settings.windowHeight) / 16.0f)),
-//            1);
-//
-//
-//    // RENDER TARGET IMAGE: GENERAL -> TRANSFER SRC
-//    vk::ImageMemoryBarrier barrierRenderTargetToTransferSrc = getImagePipelineBarrier(
-//            vk::AccessFlagBits::eShaderWrite, vk::AccessFlagBits::eTransferRead,
-//            vk::ImageLayout::eGeneral, vk::ImageLayout::eTransferSrcOptimal, renderTargetImage.image);
-//
-//    // SWAP CHAIN IMAGE: UNDEFINED -> TRANSFER DST
-//    vk::ImageMemoryBarrier barrierSwapChainToTransferDst = getImagePipelineBarrier(
-//            vk::AccessFlagBits::eNoneKHR, vk::AccessFlagBits::eTransferWrite,
-//            vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal, swapChainImage);
-//
-//    vk::ImageMemoryBarrier barriers[2] = {barrierRenderTargetToTransferSrc, barrierSwapChainToTransferDst};
-//
-//    commandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eTransfer,
-//                                  vk::DependencyFlagBits::eByRegion, 0, nullptr,
-//                                  0, nullptr, 2, barriers);
-//
-//
-//    // COPY RENDER TARGET IMAGE TO SWAP CHAIN IMAGE
-//    vk::ImageSubresourceLayers subresourceLayers = {
-//            .aspectMask = vk::ImageAspectFlagBits::eColor,
-//            .mipLevel = 0,
-//            .baseArrayLayer = 0,
-//            .layerCount = 1
-//    };
-//
-//    vk::ImageCopy imageCopy = {
-//            .srcSubresource = subresourceLayers,
-//            .srcOffset = {0, 0, 0},
-//            .dstSubresource = subresourceLayers,
-//            .dstOffset = {0, 0, 0},
-//            .extent = {
-//                    .width = settings.windowWidth,
-//                    .height = settings.windowHeight,
-//                    .depth = 1
-//            }
-//    };
-//
-//    commandBuffer.copyImage(renderTargetImage.image, vk::ImageLayout::eTransferSrcOptimal, swapChainImage,
-//                            vk::ImageLayout::eTransferDstOptimal, 1, &imageCopy);
-//
-//
-//    // SWAP CHAIN IMAGE: TRANSFER DST -> PRESENT
-//    vk::ImageMemoryBarrier barrierSwapChainToPresent = getImagePipelineBarrier(
-//            vk::AccessFlagBits::eTransferWrite, vk::AccessFlagBits::eMemoryRead,
-//            vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::ePresentSrcKHR, swapChainImage);
-//
-//    commandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eTransfer,
-//                                  vk::DependencyFlagBits::eByRegion, 0, nullptr,
-//                                  0, nullptr, 1, &barrierSwapChainToPresent);
-//
-//    commandBuffer.end();
-//}
 
 void Vulkan::createFence() {
     fence = device.createFence({});
@@ -958,7 +867,7 @@ void Vulkan::destroyBuffer(const VulkanBuffer &buffer) const {
 void Vulkan::executeSingleTimeCommand(const std::function<void(const vk::CommandBuffer &singleTimeCommandBuffer)> &c) {
     vk::CommandBuffer singleTimeCommandBuffer = device.allocateCommandBuffers(
             {
-                    .commandPool = computeCommandPool,
+                    .commandPool = commandPool,
                     .level = vk::CommandBufferLevel::ePrimary,
                     .commandBufferCount = 1
             }).front();
@@ -984,7 +893,7 @@ void Vulkan::executeSingleTimeCommand(const std::function<void(const vk::Command
     device.waitForFences(1, &f, true, UINT64_MAX);
 
     device.destroyFence(f);
-    device.freeCommandBuffers(computeCommandPool, singleTimeCommandBuffer);
+    device.freeCommandBuffers(commandPool, singleTimeCommandBuffer);
 }
 
 void Vulkan::createAABBBuffer() {
