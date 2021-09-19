@@ -7,6 +7,7 @@
 #include <vulkan/vulkan.hpp>
 #include <vkfw/vkfw.hpp>
 #include "vulkan_settings.h"
+#include "scene.h"
 #include <functional>
 
 struct VulkanImage {
@@ -27,20 +28,10 @@ struct VulkanAccelerationStructure {
     VulkanBuffer instancesBuffer;
 };
 
-// ---- TODO: MOVE!
-#include <glm/glm.hpp>
-
-struct SpherePrimitive {
-    vk::AabbPositionsKHR bbox;
-    alignas(4) uint32_t materialType;
-    alignas(16) glm::vec4 albedo;
-    alignas(4) float materialSpecificAttribute;
-};
-// ----
 
 class Vulkan {
 public:
-    Vulkan(VulkanSettings settings);
+    Vulkan(VulkanSettings settings, Scene scene);
 
     ~Vulkan();
 
@@ -53,6 +44,8 @@ public:
 
 private:
     VulkanSettings settings;
+    Scene scene;
+    std::vector<vk::AabbPositionsKHR> aabbs;
 
     const vk::Format swapChainImageFormat = vk::Format::eR8G8B8A8Unorm;
     const vk::ColorSpaceKHR colorSpace = vk::ColorSpaceKHR::eSrgbNonlinear;
@@ -75,15 +68,6 @@ private:
             VK_KHR_MAINTENANCE3_EXTENSION_NAME
     };
 
-    // TODO: MOVE!!
-    std::vector<SpherePrimitive> spheres = {
-            {
-                    .bbox = {-0.5f, -0.5f, -0.5f, 0.5f, 0.5f, 0.5f},
-                    .materialType = 0,
-                    .albedo = glm::vec4(1.0f, 0.5f, 0.0f, 1.0f),
-                    .materialSpecificAttribute = 0.0f
-            }
-    };
 
     vkfw::Window window;
     vk::Instance instance;
@@ -121,13 +105,15 @@ private:
 
     VulkanImage renderTargetImage;
 
-    VulkanBuffer sphereBuffer;
+    VulkanBuffer aabbBuffer;
 
     VulkanAccelerationStructure bottomAccelerationStructure;
     VulkanAccelerationStructure topAccelerationStructure;
 
     VulkanBuffer shaderBindingTableBuffer;
     vk::StridedDeviceAddressRegionKHR sbtRayGenAddressRegion, sbtHitAddressRegion, sbtMissAddressRegion;
+
+    VulkanBuffer sphereBuffer;
 
     void createWindow();
 
@@ -188,7 +174,7 @@ private:
 
     void executeSingleTimeCommand(const std::function<void(const vk::CommandBuffer &singleTimeCommandBuffer)> &c);
 
-    void createSphereBuffer();
+    void createAABBBuffer();
 
     void createBottomAccelerationStructure();
 
@@ -201,5 +187,9 @@ private:
     void createShaderBindingTable();
 
     [[nodiscard]] vk::PhysicalDeviceRayTracingPipelinePropertiesKHR getRayTracingProperties() const;
+
+    void createSphereBuffer();
+
+    [[nodiscard]] static vk::AabbPositionsKHR getAABBFromSphere(const glm::vec4 geometry) ;
 
 };

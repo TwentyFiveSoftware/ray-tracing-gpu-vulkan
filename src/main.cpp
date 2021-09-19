@@ -8,7 +8,7 @@ int main() {
             .windowHeight = 675
     };
 
-    Vulkan vulkan(settings);
+    Vulkan vulkan(settings, generateRandomScene());
 
 
     while (!vulkan.shouldExit()) {

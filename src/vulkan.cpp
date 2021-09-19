@@ -6,8 +6,14 @@
 #include <fstream>
 #include <stb_image_write.h>
 
-Vulkan::Vulkan(VulkanSettings settings) :
-        settings(settings) {
+Vulkan::Vulkan(VulkanSettings settings, Scene scene) :
+        settings(settings), scene(scene) {
+
+    aabbs.reserve(scene.sphereAmount);
+    for (int i = 0; i < scene.sphereAmount; i++) {
+        aabbs.push_back(getAABBFromSphere(scene.spheres[i].geometry));
+    }
+
     createWindow();
     createInstance();
     createSurface();
@@ -20,17 +26,23 @@ Vulkan::Vulkan(VulkanSettings settings) :
     createCommandPools();
     createSwapChain();
     createRenderTargetImage();
-    createSphereBuffer();
+
+    createAABBBuffer();
     createBottomAccelerationStructure();
     createTopAccelerationStructure();
+
+    createSphereBuffer();
+
     createDescriptorSetLayout();
     createDescriptorPool();
     createDescriptorSet();
     createPipelineLayout();
     createComputePipeline();
     createRTPipeline();
+
     createShaderBindingTable();
     createCommandBuffer();
+
     createFence();
     createSemaphore();
 }
@@ -52,6 +64,7 @@ Vulkan::~Vulkan() {
     destroyAccelerationStructure(bottomAccelerationStructure);
 
     destroyBuffer(sphereBuffer);
+    destroyBuffer(aabbBuffer);
     destroyBuffer(shaderBindingTableBuffer);
 
     device.destroyImageView(swapChainImageView);
@@ -357,6 +370,13 @@ void Vulkan::createDescriptorSetLayout() {
                         .descriptorType = vk::DescriptorType::eAccelerationStructureKHR,
                         .descriptorCount = 1,
                         .stageFlags = vk::ShaderStageFlagBits::eRaygenKHR | vk::ShaderStageFlagBits::eClosestHitKHR
+                },
+                {
+                        .binding = 2,
+                        .descriptorType = vk::DescriptorType::eUniformBuffer,
+                        .descriptorCount = 1,
+                        .stageFlags = vk::ShaderStageFlagBits::eIntersectionKHR |
+                                      vk::ShaderStageFlagBits::eClosestHitKHR
                 }
         };
 
@@ -397,6 +417,10 @@ void Vulkan::createDescriptorPool() {
                 },
                 {
                         .type = vk::DescriptorType::eAccelerationStructureKHR,
+                        .descriptorCount = 1
+                },
+                {
+                        .type = vk::DescriptorType::eUniformBuffer,
                         .descriptorCount = 1
                 }
         };
@@ -463,6 +487,12 @@ void Vulkan::createDescriptorSet() {
                 .pAccelerationStructures = &topAccelerationStructure.accelerationStructure
         };
 
+        vk::DescriptorBufferInfo sphereBufferInfo = {
+                .buffer = sphereBuffer.buffer,
+                .offset = 0,
+                .range = sizeof(Sphere) * MAX_SPHERE_AMOUNT
+        };
+
         std::vector<vk::WriteDescriptorSet> descriptorWrites = {
                 {
                         .dstSet = rtDescriptorSet,
@@ -479,6 +509,14 @@ void Vulkan::createDescriptorSet() {
                         .dstArrayElement = 0,
                         .descriptorCount = 1,
                         .descriptorType = vk::DescriptorType::eAccelerationStructureKHR
+                },
+                {
+                        .dstSet = rtDescriptorSet,
+                        .dstBinding = 2,
+                        .dstArrayElement = 0,
+                        .descriptorCount = 1,
+                        .descriptorType = vk::DescriptorType::eUniformBuffer,
+                        .pBufferInfo = &sphereBufferInfo
                 }
         };
 
@@ -949,16 +987,19 @@ void Vulkan::executeSingleTimeCommand(const std::function<void(const vk::Command
     device.freeCommandBuffers(computeCommandPool, singleTimeCommandBuffer);
 }
 
-void Vulkan::createSphereBuffer() {
-    sphereBuffer = createBuffer(sizeof(SpherePrimitive) * spheres.size(),
-                                vk::BufferUsageFlagBits::eAccelerationStructureBuildInputReadOnlyKHR |
-                                vk::BufferUsageFlagBits::eShaderDeviceAddress,
-                                vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent |
-                                vk::MemoryPropertyFlagBits::eDeviceLocal);
+void Vulkan::createAABBBuffer() {
+    const vk::DeviceSize bufferSize = sizeof(vk::AabbPositionsKHR) * aabbs.size();
 
-    void* data = device.mapMemory(sphereBuffer.memory, 0, sizeof(SpherePrimitive) * spheres.size());
-    memcpy(data, spheres.data(), sizeof(SpherePrimitive) * spheres.size());
-    device.unmapMemory(sphereBuffer.memory);
+    aabbBuffer = createBuffer(bufferSize,
+                              vk::BufferUsageFlagBits::eAccelerationStructureBuildInputReadOnlyKHR |
+                              vk::BufferUsageFlagBits::eShaderDeviceAddress,
+                              vk::MemoryPropertyFlagBits::eHostVisible |
+                              vk::MemoryPropertyFlagBits::eHostCoherent |
+                              vk::MemoryPropertyFlagBits::eDeviceLocal);
+
+    void* data = device.mapMemory(aabbBuffer.memory, 0, bufferSize);
+    memcpy(data, aabbs.data(), bufferSize);
+    device.unmapMemory(aabbBuffer.memory);
 }
 
 void Vulkan::createBottomAccelerationStructure() {
@@ -969,9 +1010,8 @@ void Vulkan::createBottomAccelerationStructure() {
     };
 
     geometry.geometry.aabbs.sType = vk::StructureType::eAccelerationStructureGeometryAabbsDataKHR;
-    geometry.geometry.aabbs.stride = sizeof(SpherePrimitive);
-    geometry.geometry.aabbs.data.deviceAddress = device.getBufferAddress({.buffer = sphereBuffer.buffer})
-                                                 + offsetof(SpherePrimitive, bbox);
+    geometry.geometry.aabbs.stride = sizeof(vk::AabbPositionsKHR);
+    geometry.geometry.aabbs.data.deviceAddress = device.getBufferAddress({.buffer = aabbBuffer.buffer});
 
 
     vk::AccelerationStructureBuildGeometryInfoKHR buildInfo = {
@@ -987,7 +1027,7 @@ void Vulkan::createBottomAccelerationStructure() {
 
 
     // CALCULATE REQUIRED SIZE FOR THE ACCELERATION STRUCTURE
-    std::vector<uint32_t> maxPrimitiveCounts = {static_cast<uint32_t>(spheres.size())};
+    std::vector<uint32_t> maxPrimitiveCounts = {static_cast<uint32_t>(aabbs.size())};
 
     vk::AccelerationStructureBuildSizesInfoKHR buildSizesInfo = device.getAccelerationStructureBuildSizesKHR(
             vk::AccelerationStructureBuildTypeKHR::eDevice, buildInfo, maxPrimitiveCounts, dynamicDispatchLoader);
@@ -1023,7 +1063,7 @@ void Vulkan::createBottomAccelerationStructure() {
 
     // BUILD THE ACCELERATION STRUCTURE
     vk::AccelerationStructureBuildRangeInfoKHR buildRangeInfo = {
-            .primitiveCount = static_cast<uint32_t>(spheres.size()),
+            .primitiveCount = static_cast<uint32_t>(aabbs.size()),
             .primitiveOffset = 0,
             .firstVertex = 0,
             .transformOffset = 0
@@ -1215,4 +1255,29 @@ vk::PhysicalDeviceRayTracingPipelinePropertiesKHR Vulkan::getRayTracingPropertie
     physicalDevice.getProperties2(&physicalDeviceProperties2);
 
     return rayTracingPipelinePropertiesKhr;
+}
+
+void Vulkan::createSphereBuffer() {
+    const vk::DeviceSize bufferSize = sizeof(Sphere) * MAX_SPHERE_AMOUNT;
+
+    sphereBuffer = createBuffer(bufferSize,
+                                vk::BufferUsageFlagBits::eUniformBuffer,
+                                vk::MemoryPropertyFlagBits::eHostVisible |
+                                vk::MemoryPropertyFlagBits::eHostCoherent |
+                                vk::MemoryPropertyFlagBits::eDeviceLocal);
+
+    void* data = device.mapMemory(sphereBuffer.memory, 0, bufferSize);
+    memcpy(data, scene.spheres, sizeof(Sphere) * scene.sphereAmount);
+    device.unmapMemory(sphereBuffer.memory);
+}
+
+vk::AabbPositionsKHR Vulkan::getAABBFromSphere(const glm::vec4 geometry) {
+    return {
+            .minX = geometry.x - geometry.w,
+            .minY = geometry.y - geometry.w,
+            .minZ = geometry.z - geometry.w,
+            .maxX = geometry.x + geometry.w,
+            .maxY = geometry.y + geometry.w,
+            .maxZ = geometry.z + geometry.w
+    };
 }

@@ -1,7 +1,18 @@
 #version 460
 #extension GL_EXT_ray_tracing : require
-#extension GL_EXT_buffer_reference : require
-#extension GL_EXT_scalar_block_layout : require
+
+struct Sphere {
+    vec4 geometry;
+    uint materialType;
+    uint textureType;
+    vec4 colors[2];
+    float materialSpecificAttribute;
+};
+
+layout(binding = 2) uniform Scene {
+    Sphere spheres[512];
+    uint sphereAmount;
+} scene;
 
 hitAttributeEXT vec3 pointOnSphere;
 
@@ -29,7 +40,9 @@ void main() {
     const float tMin = gl_RayTminEXT;
     const float tMax = gl_RayTmaxEXT;
 
-    vec2 results = calculateIntersections(origin, direction, vec3(0.0f, 0.0f, 0.0f), 0.5f);
+    const Sphere sphere = scene.spheres[gl_PrimitiveID];
+
+    const vec2 results = calculateIntersections(origin, direction, sphere.geometry.xyz, sphere.geometry.w);
 
     if (results.x >= tMin && results.x <= tMax) {
         pointOnSphere = origin + results.x * direction;
@@ -38,7 +51,5 @@ void main() {
     } else if (results.y >= tMin && results.y <= tMax) {
         pointOnSphere = origin + results.y * direction;
         reportIntersectionEXT(results.y, 0);
-
     }
-
 }
