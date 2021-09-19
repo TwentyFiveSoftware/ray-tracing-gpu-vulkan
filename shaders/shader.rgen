@@ -1,10 +1,19 @@
 #version 460
 #extension GL_EXT_ray_tracing : require
 
+struct Payload {
+    uint seed;
+
+    bool doesScatter;
+    vec3 attenuation;
+    vec3 scatterDirection;
+};
+
+
 layout(binding = 0, rgba8) uniform image2D renderTarget;
 layout(binding = 1) uniform accelerationStructureEXT accelerationStructure;
 
-layout(location = 0) rayPayloadEXT vec3 payload;
+layout(location = 0) rayPayloadEXT Payload payload;
 
 struct Ray {
     vec3 origin;
@@ -32,8 +41,11 @@ const Camera camera = Camera(25.0f, 0.0f, 10.0f, vec3(13.0f, 2.0f, -3.0f), vec3(
 
 Viewport calculateViewport(const float aspectRatio);
 Ray getCameraRay(const Viewport viewport, const vec2 uv);
+uint getRandomSeed(const uint val0, const uint val1);
 
 void main() {
+    payload.seed = getRandomSeed(gl_LaunchIDEXT.x, gl_LaunchIDEXT.y);
+
     const vec2 size = vec2(gl_LaunchSizeEXT.xy);
     const float aspectRatio = size.x / size.y;
 
@@ -44,7 +56,7 @@ void main() {
 
     traceRayEXT(accelerationStructure, gl_RayFlagsOpaqueEXT, 0xFF, 0, 0, 0, ray.origin, 0.001f, ray.direction, 100.0f, 0);
 
-    const vec3 pixelColor = sqrt(payload);
+    const vec3 pixelColor = sqrt(payload.attenuation);
     imageStore(renderTarget, ivec2(gl_LaunchIDEXT.xy), vec4(pixelColor, 1.0f));
 }
 
@@ -68,4 +80,20 @@ Ray getCameraRay(const Viewport viewport, const vec2 uv) {
     const vec3 to = viewport.upperLeftCorner + viewport.horizontal * uv.x - viewport.vertical * uv.y;
 
     return Ray(from, normalize(to - from));
+}
+
+
+// RANDOM
+uint getRandomSeed(const uint val0, const uint val1) {
+    uint v0 = val0;
+    uint v1 = val1;
+    uint s0 = 0;
+
+    for (uint n = 0; n < 16; n++) {
+        s0 += 0x9e3779b9;
+        v0 += ((v1 << 4) + 0xa341316c) ^ (v1 + s0) ^ ((v1 >> 5) + 0xc8013ea4);
+        v1 += ((v0 << 4) + 0xad90777d) ^ (v0 + s0) ^ ((v0 >> 5) + 0x7e95761e);
+    }
+
+    return v0;
 }

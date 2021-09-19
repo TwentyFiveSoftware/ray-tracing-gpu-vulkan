@@ -1,8 +1,18 @@
 #version 460
 #extension GL_EXT_ray_tracing : require
 
-layout(location = 0) rayPayloadInEXT vec3 payload;
+struct Payload {
+    uint seed;
+
+    bool doesScatter;
+    vec3 attenuation;
+    vec3 scatterDirection;
+};
+
+layout(location = 0) rayPayloadInEXT Payload payload;
 
 void main() {
-    payload = vec3(0.7f, 0.8f, 1.0f);
+    payload.doesScatter = false;
+    payload.attenuation = vec3(0.7f, 0.8f, 1.0f);
+    payload.scatterDirection = vec3(0.0f);
 }

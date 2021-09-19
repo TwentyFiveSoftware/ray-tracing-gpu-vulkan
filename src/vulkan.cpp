@@ -369,7 +369,7 @@ void Vulkan::createDescriptorSetLayout() {
                         .binding = 1,
                         .descriptorType = vk::DescriptorType::eAccelerationStructureKHR,
                         .descriptorCount = 1,
-                        .stageFlags = vk::ShaderStageFlagBits::eRaygenKHR | vk::ShaderStageFlagBits::eClosestHitKHR
+                        .stageFlags = vk::ShaderStageFlagBits::eRaygenKHR
                 },
                 {
                         .binding = 2,
