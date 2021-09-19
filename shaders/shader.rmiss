@@ -4,6 +4,8 @@
 layout(location = 0) rayPayloadInEXT vec3 payload;
 
 void main() {
-    const float y = float(gl_LaunchIDEXT.y) / float(gl_LaunchSizeEXT.y);
-    payload = vec3(0.0f, 0.0f, y);
+    const float t = 0.5f * (gl_WorldRayDirectionEXT.y + 1.0f);
+    payload = mix(vec3(1.0f), vec3(0.5f, 0.7f, 1.0f), t);
+
+//    payload = vec3(0.5f, 0.7f, 1.0f);
 }

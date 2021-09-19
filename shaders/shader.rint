@@ -24,14 +24,18 @@ vec2 calculateIntersections(vec3 rayOrigin, vec3 rayDirection, vec3 center, floa
 }
 
 void main() {
-    vec3 origin = gl_WorldRayOriginEXT;
-    vec3 direction = gl_WorldRayDirectionEXT;
+    const vec3 origin = gl_WorldRayOriginEXT;
+    const vec3 direction = gl_WorldRayDirectionEXT;
+    const float tMin = gl_RayTminEXT;
+    const float tMax = gl_RayTmaxEXT;
 
-    vec2 t = calculateIntersections(origin, direction, vec3(0.0f, 0.0f, 0.0f), 0.5f);
+    reportIntersectionEXT(1.0f, 0);
 
-    pointOnSphere = origin + t.x * direction;
-    reportIntersectionEXT(t.x, 0);
-
-    pointOnSphere = origin + t.y * direction;
-    reportIntersectionEXT(t.y, 0);
+//    vec2 t = calculateIntersections(origin, direction, vec3(0.0f, 0.0f, 0.0f), 0.5f);
+//
+//    pointOnSphere = origin + t.x * direction;
+//    reportIntersectionEXT(t.x, 0);
+//
+//    pointOnSphere = origin + t.y * direction;
+//    reportIntersectionEXT(t.y, 0);
 }

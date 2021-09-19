@@ -10,9 +10,9 @@ int main() {
 
     Vulkan vulkan(settings);
 
-    vulkan.render();
 
     while (!vulkan.shouldExit()) {
+        vulkan.render();
         vulkan.update();
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }

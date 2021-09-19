@@ -67,15 +67,12 @@ private:
             VK_KHR_SWAPCHAIN_EXTENSION_NAME,
             VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME,
             VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
-//            VK_KHR_SPIRV_1_4_EXTENSION_NAME,
-//            VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME,
             VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME,
             VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME,
             VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME,
             VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,
             VK_KHR_PIPELINE_LIBRARY_EXTENSION_NAME,
-            VK_KHR_MAINTENANCE3_EXTENSION_NAME,
-//            VK_KHR_MAINTENANCE1_EXTENSION_NAME,
+            VK_KHR_MAINTENANCE3_EXTENSION_NAME
     };
 
     // TODO: MOVE!!
@@ -99,7 +96,7 @@ private:
     uint32_t graphicsQueueFamily = 0, computeQueueFamily = 0;
     vk::Queue graphicsQueue, computeQueue;
 
-    vk::CommandPool commandPool;
+    vk::CommandPool computeCommandPool, graphicsCommandPool;
 
     vk::SwapchainKHR swapChain;
     vk::Image swapChainImage;
@@ -129,6 +126,9 @@ private:
     VulkanAccelerationStructure bottomAccelerationStructure;
     VulkanAccelerationStructure topAccelerationStructure;
 
+    VulkanBuffer shaderBindingTableBuffer;
+    vk::StridedDeviceAddressRegionKHR sbtRayGenAddressRegion, sbtHitAddressRegion, sbtMissAddressRegion;
+
     void createWindow();
 
     void createInstance();
@@ -141,7 +141,7 @@ private:
 
     void createLogicalDevice();
 
-    void createCommandPool();
+    void createCommandPools();
 
     void createSwapChain();
 
@@ -197,5 +197,9 @@ private:
     void destroyAccelerationStructure(const VulkanAccelerationStructure &accelerationStructure);
 
     [[nodiscard]] vk::ShaderModule createShaderModule(const std::string &path) const;
+
+    void createShaderBindingTable();
+
+    [[nodiscard]] vk::PhysicalDeviceRayTracingPipelinePropertiesKHR getRayTracingProperties() const;
 
 };
