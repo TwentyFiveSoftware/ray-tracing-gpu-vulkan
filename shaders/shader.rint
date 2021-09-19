@@ -29,13 +29,16 @@ void main() {
     const float tMin = gl_RayTminEXT;
     const float tMax = gl_RayTmaxEXT;
 
-    reportIntersectionEXT(1.0f, 0);
+    vec2 results = calculateIntersections(origin, direction, vec3(0.0f, 0.0f, 0.0f), 0.5f);
 
-//    vec2 t = calculateIntersections(origin, direction, vec3(0.0f, 0.0f, 0.0f), 0.5f);
-//
-//    pointOnSphere = origin + t.x * direction;
-//    reportIntersectionEXT(t.x, 0);
-//
-//    pointOnSphere = origin + t.y * direction;
-//    reportIntersectionEXT(t.y, 0);
+    if (results.x >= tMin && results.x <= tMax) {
+        pointOnSphere = origin + results.x * direction;
+        reportIntersectionEXT(results.x, 0);
+
+    } else if (results.y >= tMin && results.y <= tMax) {
+        pointOnSphere = origin + results.y * direction;
+        reportIntersectionEXT(results.y, 0);
+
+    }
+
 }
