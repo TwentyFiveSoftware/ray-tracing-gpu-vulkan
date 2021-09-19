@@ -55,6 +55,7 @@ Viewport calculateViewport(const float aspectRatio);
 Ray getCameraRay(const Viewport viewport, const vec2 uv);
 uint getRandomSeed(const uint val0, const uint val1);
 float randomFloat();
+float randomInInterval(const float min, const float max);
 
 
 // MAIN
@@ -117,7 +118,10 @@ Viewport calculateViewport(const float aspectRatio) {
 }
 
 Ray getCameraRay(const Viewport viewport, const vec2 uv) {
-    const vec3 from = camera.lookFrom;
+    const vec2 random = (camera.aperture / 2.0f) * normalize(vec2(randomInInterval(-1.0f, 1.0f), randomInInterval(-1.0f, 1.0f)));
+    const vec3 offset = viewport.cameraRight * random.x + viewport.cameraUp * random.y;
+
+    const vec3 from = camera.lookFrom + offset;
     const vec3 to = viewport.upperLeftCorner + viewport.horizontal * uv.x - viewport.vertical * uv.y;
 
     return Ray(from, normalize(to - from));
@@ -146,4 +150,8 @@ uint randomInt() {
 
 float randomFloat() {
     return float(randomInt() & 0x00FFFFFFu) / float(0x01000000u);
+}
+
+float randomInInterval(const float min, const float max) {
+    return randomFloat() * (max - min) + min;
 }
