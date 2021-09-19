@@ -8,6 +8,7 @@ struct Payload {
     bool doesScatter;
     vec3 attenuation;
     vec3 scatterDirection;
+    vec3 pointOnSphere;
 };
 
 struct Sphere {
@@ -55,6 +56,7 @@ void main() {
     payload.doesScatter = true;
     payload.attenuation = getTextureColor(sphere).rgb;
     payload.scatterDirection = getDiffuseScatterDirection(sphere, normal);
+    payload.pointOnSphere = pointOnSphere;
 }
 
 

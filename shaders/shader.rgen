@@ -1,19 +1,15 @@
 #version 460
 #extension GL_EXT_ray_tracing : require
 
+// STRUCTS
 struct Payload {
     uint seed;
 
     bool doesScatter;
     vec3 attenuation;
     vec3 scatterDirection;
+    vec3 pointOnSphere;
 };
-
-
-layout(binding = 0, rgba8) uniform image2D renderTarget;
-layout(binding = 1) uniform accelerationStructureEXT accelerationStructure;
-
-layout(location = 0) rayPayloadEXT Payload payload;
 
 struct Ray {
     vec3 origin;
@@ -37,12 +33,29 @@ struct Viewport {
     vec3 cameraRight;
 };
 
+
+// INPUTS
+layout(binding = 0, rgba8) uniform image2D renderTarget;
+layout(binding = 1) uniform accelerationStructureEXT accelerationStructure;
+
+layout(location = 0) rayPayloadEXT Payload payload;
+
+
+// CONSTANTS
+const float MAX_RAY_COLLISION_DISTANCE = 10000.0f;
+const uint MAX_DEPTH = 50;
+
 const Camera camera = Camera(25.0f, 0.0f, 10.0f, vec3(13.0f, 2.0f, -3.0f), vec3(0.0f), vec3(0.0f, 1.0f, 0.0f));
 
+
+// METHODS
+vec3 calculateRayColor(in Ray ray);
 Viewport calculateViewport(const float aspectRatio);
 Ray getCameraRay(const Viewport viewport, const vec2 uv);
 uint getRandomSeed(const uint val0, const uint val1);
 
+
+// MAIN
 void main() {
     payload.seed = getRandomSeed(gl_LaunchIDEXT.x, gl_LaunchIDEXT.y);
 
@@ -52,14 +65,37 @@ void main() {
     const Viewport viewport = calculateViewport(aspectRatio);
 
     const vec2 uv = gl_LaunchIDEXT.xy / size;
+
     Ray ray = getCameraRay(viewport, uv);
+    vec3 color = calculateRayColor(ray);
 
-    traceRayEXT(accelerationStructure, gl_RayFlagsOpaqueEXT, 0xFF, 0, 0, 0, ray.origin, 0.001f, ray.direction, 100.0f, 0);
-
-    const vec3 pixelColor = sqrt(payload.attenuation);
+    const vec3 pixelColor = sqrt(color);
     imageStore(renderTarget, ivec2(gl_LaunchIDEXT.xy), vec4(pixelColor, 1.0f));
 }
 
+// RENDERING
+vec3 calculateRayColor(in Ray ray) {
+    vec3 reflectedColor = vec3(1.0f);
+    vec3 lightSourceColor = vec3(0.0f);
+
+    for (uint depth = 0; depth < MAX_DEPTH; depth++) {
+        traceRayEXT(accelerationStructure, gl_RayFlagsOpaqueEXT, 0xFF, 0, 0, 0, ray.origin, 0.001f, ray.direction, MAX_RAY_COLLISION_DISTANCE, 0);
+
+        if (payload.doesScatter) {
+            reflectedColor *= payload.attenuation;
+            ray = Ray(payload.pointOnSphere, normalize(payload.scatterDirection));
+
+        } else {
+            // BACKGROUND
+            lightSourceColor = payload.attenuation;
+            break;
+        }
+    }
+
+    return reflectedColor * lightSourceColor;
+}
+
+// VIEWPORT
 Viewport calculateViewport(const float aspectRatio) {
     const float viewportHeight = tan(radians(camera.fov) / 2.0f) * 2.0f;
     const float viewportWidth = aspectRatio * viewportHeight;
