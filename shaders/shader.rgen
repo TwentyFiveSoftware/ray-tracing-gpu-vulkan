@@ -44,6 +44,7 @@ layout(location = 0) rayPayloadEXT Payload payload;
 // CONSTANTS
 const float MAX_RAY_COLLISION_DISTANCE = 10000.0f;
 const uint MAX_DEPTH = 50;
+const uint SAMPLES = 5000;
 
 const Camera camera = Camera(25.0f, 0.0f, 10.0f, vec3(13.0f, 2.0f, -3.0f), vec3(0.0f), vec3(0.0f, 1.0f, 0.0f));
 
@@ -53,6 +54,7 @@ vec3 calculateRayColor(in Ray ray);
 Viewport calculateViewport(const float aspectRatio);
 Ray getCameraRay(const Viewport viewport, const vec2 uv);
 uint getRandomSeed(const uint val0, const uint val1);
+float randomFloat();
 
 
 // MAIN
@@ -64,12 +66,15 @@ void main() {
 
     const Viewport viewport = calculateViewport(aspectRatio);
 
-    const vec2 uv = gl_LaunchIDEXT.xy / size;
+    vec3 summedPixelColor = vec3(0.0f);
 
-    Ray ray = getCameraRay(viewport, uv);
-    vec3 color = calculateRayColor(ray);
+    for (uint i = 0; i < SAMPLES; i++) {
+        const vec2 uv = vec2(gl_LaunchIDEXT.x + randomFloat(), gl_LaunchIDEXT.y + randomFloat()) / size;
+        const Ray ray = getCameraRay(viewport, uv);
+        summedPixelColor += calculateRayColor(ray);
+    }
 
-    const vec3 pixelColor = sqrt(color);
+    const vec3 pixelColor = sqrt(summedPixelColor / SAMPLES);
     imageStore(renderTarget, ivec2(gl_LaunchIDEXT.xy), vec4(pixelColor, 1.0f));
 }
 
@@ -132,4 +137,13 @@ uint getRandomSeed(const uint val0, const uint val1) {
     }
 
     return v0;
+}
+
+uint randomInt() {
+    payload.seed = 1664525 * payload.seed + 1013904223;
+    return payload.seed;
+}
+
+float randomFloat() {
+    return float(randomInt() & 0x00FFFFFFu) / float(0x01000000u);
 }
