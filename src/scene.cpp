@@ -12,6 +12,34 @@ float randomFloat() {
     return randomFloat(0.0f, 1.0f);
 }
 
+// https://www.codespeedy.com/hsv-to-rgb-in-cpp/
+glm::vec4 getRandomColor() {
+    float h = std::floor(randomFloat(0.0f, 360.0f));
+    float s = 0.75f, v = 0.45f;
+
+    float C = s * v;
+    float X = C * (1.0f - std::fabs(std::fmod(h / 60.0f, 2.0f) - 1.0f));
+    float m = v - C;
+
+    float r, g, b;
+
+    if (h >= 0 && h < 60) {
+        r = C, g = X, b = 0;
+    } else if (h >= 60 && h < 120) {
+        r = X, g = C, b = 0;
+    } else if (h >= 120 && h < 180) {
+        r = 0, g = C, b = X;
+    } else if (h >= 180 && h < 240) {
+        r = 0, g = X, b = C;
+    } else if (h >= 240 && h < 300) {
+        r = X, g = 0, b = C;
+    } else {
+        r = C, g = 0, b = X;
+    }
+
+    return {r + m, g + m, b + m, 1.0f};
+}
+
 Scene generateRandomScene() {
     Scene scene = {};
 
@@ -27,7 +55,7 @@ Scene generateRandomScene() {
             .geometry = glm::vec4(-4.0f, 1.0f, 0.0f, 1.0f),
             .materialType = MaterialType::DIFFUSE,
             .textureType = TextureType::SOLID,
-            .colors = {glm::vec4(0.4f, 0.2f, 0.1f, 1.0f)},
+            .colors = {glm::vec4(0.6f, 0.3f, 0.1f, 1.0f)},
             .materialSpecificAttribute = 0.0f
     };
 
@@ -35,7 +63,7 @@ Scene generateRandomScene() {
             .geometry = glm::vec4(4.0f, 1.0f, 0.0f, 1.0f),
             .materialType = MaterialType::METAL,
             .textureType = TextureType::SOLID,
-            .colors = {glm::vec4(0.7f, 0.6f, 0.5f, 1.0f)},
+            .colors = {glm::vec4(0.8f, 0.8f, 0.8f, 1.0f)},
             .materialSpecificAttribute = 0.0f
     };
 
@@ -56,28 +84,24 @@ Scene generateRandomScene() {
 
             const float materialProbability = randomFloat();
 
-            if (materialProbability < 0.8) {
+            if (materialProbability < 0.7) {
                 scene.spheres[sphereIndex].materialType = MaterialType::DIFFUSE;
                 scene.spheres[sphereIndex].textureType = TextureType::SOLID;
-                scene.spheres[sphereIndex].colors[0] =
-                        glm::vec4(randomFloat() * randomFloat(), randomFloat() * randomFloat(),
-                                  randomFloat() * randomFloat(), 1.0f);
+                scene.spheres[sphereIndex].colors[0] = getRandomColor();
                 scene.spheres[sphereIndex].materialSpecificAttribute = 0.0f;
 
-            } else if (materialProbability < 0.95) {
+            } else if (materialProbability < 0.85) {
                 scene.spheres[sphereIndex].materialType = MaterialType::METAL;
                 scene.spheres[sphereIndex].textureType = TextureType::SOLID;
-                scene.spheres[sphereIndex].colors[0] =
-                        glm::vec4(randomFloat() * randomFloat(), randomFloat() * randomFloat(),
-                                  randomFloat() * randomFloat(), 1.0f);
-                scene.spheres[sphereIndex].materialSpecificAttribute = randomFloat(0.0f, 0.5f);
+                scene.spheres[sphereIndex].colors[0] = glm::vec4(randomFloat(0.5f, 1.0f), randomFloat(0.5f, 1.0f),
+                                                                 randomFloat(0.5f, 1.0f), 1.0f);
+                scene.spheres[sphereIndex].materialSpecificAttribute = 0.0f;
 
             } else {
                 scene.spheres[sphereIndex].materialType = MaterialType::REFRACTIVE;
                 scene.spheres[sphereIndex].textureType = TextureType::SOLID;
                 scene.spheres[sphereIndex].colors[0] = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f);
                 scene.spheres[sphereIndex].materialSpecificAttribute = 1.5f;
-
             }
 
             sphereIndex++;
