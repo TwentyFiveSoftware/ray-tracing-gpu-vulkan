@@ -86,12 +86,6 @@ private:
     vk::Image swapChainImage;
     vk::ImageView swapChainImageView;
 
-    vk::DescriptorSetLayout computeDescriptorSetLayout;
-    vk::DescriptorPool computeDescriptorPool;
-    vk::DescriptorSet computeDescriptorSet;
-    vk::PipelineLayout computePipelineLayout;
-    vk::Pipeline computePipeline;
-
     vk::DescriptorSetLayout rtDescriptorSetLayout;
     vk::DescriptorPool rtDescriptorPool;
     vk::DescriptorSet rtDescriptorSet;
@@ -140,8 +134,6 @@ private:
     void createDescriptorSet();
 
     void createPipelineLayout();
-
-    void createComputePipeline();
 
     void createRTPipeline();
 
