@@ -3,14 +3,14 @@
 #include <iostream>
 #include "vulkan.h"
 
-const uint32_t renderCalls = 10;
-const uint32_t samples = 5000;
+const uint32_t renderCalls = 50;
+const uint32_t samples = 10000;
 
 int main() {
     // SETUP
     VulkanSettings settings = {
-            .windowWidth = 1200,
-            .windowHeight = 675
+            .windowWidth = 1920,
+            .windowHeight = 1080
     };
 
     Vulkan vulkan(settings, generateRandomScene());
