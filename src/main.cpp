@@ -3,11 +3,11 @@
 #include <iostream>
 #include "vulkan.h"
 
-const uint32_t renderCalls = 50;
-const uint32_t samples = 10000;
-
 int main() {
     // SETUP
+    const uint32_t renderCalls = 50;
+    const uint32_t samples = 10000;
+
     VulkanSettings settings = {
             .windowWidth = 1920,
             .windowHeight = 1080
@@ -17,8 +17,6 @@ int main() {
 
 
     // RENDERING
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-
     auto renderBeginTime = std::chrono::steady_clock::now();
 
     for (uint32_t number = 1; number <= renderCalls; number++) {
