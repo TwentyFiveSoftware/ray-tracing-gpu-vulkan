@@ -25,6 +25,7 @@ add_executable(
         src/vulkan.cpp
         src/scene.h
         src/scene.cpp
+        src/render_call_info.h
 )
 
 target_link_libraries(RayTracingGPUVulkan glfw3.lib vulkan-1.lib)

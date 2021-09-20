@@ -25,13 +25,14 @@ Vulkan::Vulkan(VulkanSettings settings, Scene scene) :
 
     createCommandPool();
     createSwapChain();
-    createRenderTargetImage();
+    createImages();
 
     createAABBBuffer();
     createBottomAccelerationStructure();
     createTopAccelerationStructure();
 
     createSphereBuffer();
+    createRenderCallInfoBuffer();
 
     createDescriptorSetLayout();
     createDescriptorPool();
@@ -61,11 +62,15 @@ Vulkan::~Vulkan() {
     destroyBuffer(sphereBuffer);
     destroyBuffer(aabbBuffer);
     destroyBuffer(shaderBindingTableBuffer);
+    destroyBuffer(renderCallInfoBuffer);
 
     device.destroyImageView(swapChainImageView);
     device.destroySwapchainKHR(swapChain);
     device.destroyCommandPool(commandPool);
+
     destroyImage(renderTargetImage);
+    destroyImage(summedPixelColorImage);
+
     device.destroy();
     instance.destroySurfaceKHR(surface);
     instance.destroy();
@@ -77,7 +82,9 @@ void Vulkan::update() {
     vkfw::pollEvents();
 }
 
-void Vulkan::render() {
+void Vulkan::render(const RenderCallInfo &renderCallInfo) {
+    updateRenderCallInfoBuffer(renderCallInfo);
+
     uint32_t swapChainImageIndex = device.acquireNextImageKHR(swapChain, UINT64_MAX, semaphore).value;
 
     device.resetFences(fence);
@@ -347,6 +354,18 @@ void Vulkan::createDescriptorSetLayout() {
                     .descriptorCount = 1,
                     .stageFlags = vk::ShaderStageFlagBits::eIntersectionKHR |
                                   vk::ShaderStageFlagBits::eClosestHitKHR
+            },
+            {
+                    .binding = 3,
+                    .descriptorType = vk::DescriptorType::eStorageImage,
+                    .descriptorCount = 1,
+                    .stageFlags = vk::ShaderStageFlagBits::eRaygenKHR
+            },
+            {
+                    .binding = 4,
+                    .descriptorType = vk::DescriptorType::eUniformBuffer,
+                    .descriptorCount = 1,
+                    .stageFlags = vk::ShaderStageFlagBits::eRaygenKHR
             }
     };
 
@@ -361,7 +380,7 @@ void Vulkan::createDescriptorPool() {
     std::vector<vk::DescriptorPoolSize> poolSizes = {
             {
                     .type = vk::DescriptorType::eStorageImage,
-                    .descriptorCount = 1
+                    .descriptorCount = 2
             },
             {
                     .type = vk::DescriptorType::eAccelerationStructureKHR,
@@ -369,7 +388,7 @@ void Vulkan::createDescriptorPool() {
             },
             {
                     .type = vk::DescriptorType::eUniformBuffer,
-                    .descriptorCount = 1
+                    .descriptorCount = 2
             }
     };
 
@@ -406,6 +425,17 @@ void Vulkan::createDescriptorSet() {
             .range = sizeof(Sphere) * MAX_SPHERE_AMOUNT
     };
 
+    vk::DescriptorImageInfo summedPixelColorImageInfo = {
+            .imageView = summedPixelColorImage.imageView,
+            .imageLayout = vk::ImageLayout::eGeneral
+    };
+
+    vk::DescriptorBufferInfo renderCallInfoBufferInfo = {
+            .buffer = renderCallInfoBuffer.buffer,
+            .offset = 0,
+            .range = sizeof(RenderCallInfo)
+    };
+
     std::vector<vk::WriteDescriptorSet> descriptorWrites = {
             {
                     .dstSet = rtDescriptorSet,
@@ -430,6 +460,22 @@ void Vulkan::createDescriptorSet() {
                     .descriptorCount = 1,
                     .descriptorType = vk::DescriptorType::eUniformBuffer,
                     .pBufferInfo = &sphereBufferInfo
+            },
+            {
+                    .dstSet = rtDescriptorSet,
+                    .dstBinding = 3,
+                    .dstArrayElement = 0,
+                    .descriptorCount = 1,
+                    .descriptorType = vk::DescriptorType::eStorageImage,
+                    .pImageInfo = &summedPixelColorImageInfo
+            },
+            {
+                    .dstSet = rtDescriptorSet,
+                    .dstBinding = 4,
+                    .dstArrayElement = 0,
+                    .descriptorCount = 1,
+                    .descriptorType = vk::DescriptorType::eUniformBuffer,
+                    .pBufferInfo = &renderCallInfoBufferInfo
             }
     };
 
@@ -552,15 +598,20 @@ void Vulkan::createCommandBuffer() {
     vk::CommandBufferBeginInfo beginInfo = {};
     commandBuffer.begin(&beginInfo);
 
-    // RENDER TARGET IMAGE: UNDEFINED -> GENERAL
-    vk::ImageMemoryBarrier barrierRenderTargetToGeneral = getImagePipelineBarrier(
-            vk::AccessFlagBits::eNoneKHR, vk::AccessFlagBits::eShaderWrite,
-            vk::ImageLayout::eUndefined, vk::ImageLayout::eGeneral, renderTargetImage.image);
+    // RENDER TARGET IMAGE & SUMMED PIXEL COLOR IMAGE: UNDEFINED -> GENERAL
+    vk::ImageMemoryBarrier imageBarriersToGeneral[2] = {
+            getImagePipelineBarrier(
+                    vk::AccessFlagBits::eNoneKHR, vk::AccessFlagBits::eShaderWrite,
+                    vk::ImageLayout::eUndefined, vk::ImageLayout::eGeneral, renderTargetImage.image),
+            getImagePipelineBarrier(
+                    vk::AccessFlagBits::eNoneKHR, vk::AccessFlagBits::eShaderWrite,
+                    vk::ImageLayout::eUndefined, vk::ImageLayout::eGeneral, summedPixelColorImage.image)
+    };
 
     commandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eRayTracingShaderKHR,
                                   vk::PipelineStageFlagBits::eRayTracingShaderKHR,
                                   vk::DependencyFlagBits::eByRegion, 0, nullptr,
-                                  0, nullptr, 1, &barrierRenderTargetToGeneral);
+                                  0, nullptr, 2, imageBarriersToGeneral);
 
 
     // RAY TRACING
@@ -573,21 +624,20 @@ void Vulkan::createCommandBuffer() {
     commandBuffer.traceRaysKHR(sbtRayGenAddressRegion, sbtMissAddressRegion, sbtHitAddressRegion, {},
                                settings.windowWidth, settings.windowHeight, 1, dynamicDispatchLoader);
 
-    // RENDER TARGET IMAGE: GENERAL -> TRANSFER SRC
-    vk::ImageMemoryBarrier barrierRenderTargetToTransferSrc = getImagePipelineBarrier(
-            vk::AccessFlagBits::eShaderWrite, vk::AccessFlagBits::eTransferRead,
-            vk::ImageLayout::eGeneral, vk::ImageLayout::eTransferSrcOptimal, renderTargetImage.image);
 
-    // SWAP CHAIN IMAGE: UNDEFINED -> TRANSFER DST
-    vk::ImageMemoryBarrier barrierSwapChainToTransferDst = getImagePipelineBarrier(
-            vk::AccessFlagBits::eNoneKHR, vk::AccessFlagBits::eTransferWrite,
-            vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal, swapChainImage);
-
-    vk::ImageMemoryBarrier barriers[2] = {barrierRenderTargetToTransferSrc, barrierSwapChainToTransferDst};
+    // RENDER TARGET IMAGE: GENERAL -> TRANSFER SRC & SWAP CHAIN IMAGE: UNDEFINED -> TRANSFER DST
+    vk::ImageMemoryBarrier imageBarriersToTransfer[2] = {
+            getImagePipelineBarrier(
+                    vk::AccessFlagBits::eShaderWrite, vk::AccessFlagBits::eTransferRead,
+                    vk::ImageLayout::eGeneral, vk::ImageLayout::eTransferSrcOptimal, renderTargetImage.image),
+            getImagePipelineBarrier(
+                    vk::AccessFlagBits::eNoneKHR, vk::AccessFlagBits::eTransferWrite,
+                    vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal, swapChainImage)
+    };
 
     commandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eRayTracingShaderKHR, vk::PipelineStageFlagBits::eTransfer,
                                   vk::DependencyFlagBits::eByRegion, 0, nullptr,
-                                  0, nullptr, 2, barriers);
+                                  0, nullptr, 2, imageBarriersToTransfer);
 
 
     // COPY RENDER TARGET IMAGE TO SWAP CHAIN IMAGE
@@ -704,9 +754,11 @@ VulkanImage Vulkan::createImage(const vk::Format &format, const vk::Flags<vk::Im
     };
 }
 
-void Vulkan::createRenderTargetImage() {
+void Vulkan::createImages() {
     renderTargetImage = createImage(swapChainImageFormat,
                                     vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferSrc);
+
+    summedPixelColorImage = createImage(summedPixelColorImageFormat, vk::ImageUsageFlagBits::eStorage);
 }
 
 void Vulkan::destroyImage(const VulkanImage &image) const {
@@ -1068,7 +1120,7 @@ void Vulkan::createSphereBuffer() {
     device.unmapMemory(sphereBuffer.memory);
 }
 
-vk::AabbPositionsKHR Vulkan::getAABBFromSphere(const glm::vec4 geometry) {
+vk::AabbPositionsKHR Vulkan::getAABBFromSphere(const glm::vec4 &geometry) {
     return {
             .minX = geometry.x - geometry.w,
             .minY = geometry.y - geometry.w,
@@ -1077,4 +1129,17 @@ vk::AabbPositionsKHR Vulkan::getAABBFromSphere(const glm::vec4 geometry) {
             .maxY = geometry.y + geometry.w,
             .maxZ = geometry.z + geometry.w
     };
+}
+
+void Vulkan::createRenderCallInfoBuffer() {
+    renderCallInfoBuffer = createBuffer(sizeof(RenderCallInfo), vk::BufferUsageFlagBits::eUniformBuffer,
+                                        vk::MemoryPropertyFlagBits::eHostVisible |
+                                        vk::MemoryPropertyFlagBits::eHostCoherent |
+                                        vk::MemoryPropertyFlagBits::eDeviceLocal);
+}
+
+void Vulkan::updateRenderCallInfoBuffer(const RenderCallInfo &renderCallInfo) {
+    void* data = device.mapMemory(renderCallInfoBuffer.memory, 0, sizeof(RenderCallInfo));
+    memcpy(data, &renderCallInfo, sizeof(RenderCallInfo));
+    device.unmapMemory(renderCallInfoBuffer.memory);
 }

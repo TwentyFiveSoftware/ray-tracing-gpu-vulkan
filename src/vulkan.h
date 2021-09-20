@@ -6,9 +6,10 @@
 
 #include <vulkan/vulkan.hpp>
 #include <vkfw/vkfw.hpp>
+#include <functional>
 #include "vulkan_settings.h"
 #include "scene.h"
-#include <functional>
+#include "render_call_info.h"
 
 struct VulkanImage {
     vk::Image image;
@@ -37,7 +38,7 @@ public:
 
     void update();
 
-    void render();
+    void render(const RenderCallInfo &renderCallInfo);
 
     [[nodiscard]] bool shouldExit() const;
 
@@ -48,6 +49,7 @@ private:
     std::vector<vk::AabbPositionsKHR> aabbs;
 
     const vk::Format swapChainImageFormat = vk::Format::eR8G8B8A8Unorm;
+    const vk::Format summedPixelColorImageFormat = vk::Format::eR16G16B16A16Unorm;
     const vk::ColorSpaceKHR colorSpace = vk::ColorSpaceKHR::eSrgbNonlinear;
     const vk::PresentModeKHR presentMode = vk::PresentModeKHR::eImmediate;
 
@@ -98,6 +100,7 @@ private:
     vk::Semaphore semaphore;
 
     VulkanImage renderTargetImage;
+    VulkanImage summedPixelColorImage;
 
     VulkanBuffer aabbBuffer;
 
@@ -108,6 +111,7 @@ private:
     vk::StridedDeviceAddressRegionKHR sbtRayGenAddressRegion, sbtHitAddressRegion, sbtMissAddressRegion;
 
     VulkanBuffer sphereBuffer;
+    VulkanBuffer renderCallInfoBuffer;
 
     void createWindow();
 
@@ -145,7 +149,7 @@ private:
 
     void createSemaphore();
 
-    void createRenderTargetImage();
+    void createImages();
 
     [[nodiscard]] uint32_t findMemoryTypeIndex(const uint32_t &memoryTypeBits,
                                                const vk::MemoryPropertyFlags &properties);
@@ -182,6 +186,10 @@ private:
 
     void createSphereBuffer();
 
-    [[nodiscard]] static vk::AabbPositionsKHR getAABBFromSphere(const glm::vec4 geometry) ;
+    [[nodiscard]] static vk::AabbPositionsKHR getAABBFromSphere(const glm::vec4 &geometry);
+
+    void createRenderCallInfoBuffer();
+
+    void updateRenderCallInfoBuffer(const RenderCallInfo &renderCallInfo);
 
 };

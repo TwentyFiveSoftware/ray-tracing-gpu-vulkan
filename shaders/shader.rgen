@@ -8,6 +8,12 @@
 // INPUTS
 layout(binding = 0, rgba8) uniform image2D renderTarget;
 layout(binding = 1) uniform accelerationStructureEXT accelerationStructure;
+layout(binding = 3, rgba16_snorm) uniform image2D summedPixelColorImage;
+layout(binding = 4) uniform RenderCallInfo {
+    uint number;
+    uint totalRenderCalls;
+    uint totalSamples;
+} renderCallInfo;
 
 layout(location = 0) rayPayloadEXT Payload payload;
 
@@ -15,7 +21,6 @@ layout(location = 0) rayPayloadEXT Payload payload;
 // CONSTANTS
 const float MAX_RAY_COLLISION_DISTANCE = 10000.0f;
 const uint MAX_DEPTH = 50;
-const uint SAMPLES = 5000;
 
 const Camera camera = Camera(25.0f, 0.0f, 10.0f, vec3(13.0f, 2.0f, -3.0f), vec3(0.0f), vec3(0.0f, 1.0f, 0.0f));
 
@@ -28,22 +33,25 @@ Ray getCameraRay(const Viewport viewport, const vec2 uv);
 
 // MAIN
 void main() {
-    payload.seed = getRandomSeed(gl_LaunchIDEXT.x, gl_LaunchIDEXT.y);
+    payload.seed = getRandomSeed(getRandomSeed(gl_LaunchIDEXT.x, gl_LaunchIDEXT.y), renderCallInfo.number);
 
     const vec2 size = vec2(gl_LaunchSizeEXT.xy);
     const float aspectRatio = size.x / size.y;
 
     const Viewport viewport = calculateViewport(aspectRatio);
+    const uint samplesPerCall = renderCallInfo.totalSamples / renderCallInfo.totalRenderCalls;
 
-    vec3 summedPixelColor = vec3(0.0f);
+    vec3 summedPixelColor = imageLoad(summedPixelColorImage, ivec2(gl_LaunchIDEXT.xy)).rgb;
 
-    for (uint i = 0; i < SAMPLES; i++) {
+    for (uint i = 0; i < samplesPerCall; i++) {
         const vec2 uv = vec2(gl_LaunchIDEXT.x + randomFloat(payload.seed), gl_LaunchIDEXT.y + randomFloat(payload.seed)) / size;
         const Ray ray = getCameraRay(viewport, uv);
-        summedPixelColor += calculateRayColor(ray);
+        summedPixelColor += calculateRayColor(ray) / float(renderCallInfo.totalSamples);
     }
 
-    const vec3 pixelColor = sqrt(summedPixelColor / SAMPLES);
+    imageStore(summedPixelColorImage, ivec2(gl_LaunchIDEXT.xy), vec4(summedPixelColor, 1.0f));
+
+    const vec3 pixelColor = sqrt(summedPixelColor * renderCallInfo.totalSamples / float(renderCallInfo.number * samplesPerCall));
     imageStore(renderTarget, ivec2(gl_LaunchIDEXT.xy), vec4(pixelColor, 1.0f));
 }
 
