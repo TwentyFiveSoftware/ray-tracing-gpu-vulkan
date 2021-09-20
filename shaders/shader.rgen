@@ -1,37 +1,8 @@
 #version 460
 #extension GL_EXT_ray_tracing : require
 
-// STRUCTS
-struct Payload {
-    uint seed;
-
-    bool doesScatter;
-    vec3 attenuation;
-    vec3 scatterDirection;
-    vec3 pointOnSphere;
-};
-
-struct Ray {
-    vec3 origin;
-    vec3 direction;
-};
-
-struct Camera {
-    float fov;
-    float aperture;
-    float focusDistance;
-    vec3 lookFrom;
-    vec3 lookAt;
-    vec3 up;
-};
-
-struct Viewport {
-    vec3 horizontal;
-    vec3 vertical;
-    vec3 upperLeftCorner;
-    vec3 cameraUp;
-    vec3 cameraRight;
-};
+#include "random.glsl"
+#include "structs.glsl"
 
 
 // INPUTS
@@ -53,9 +24,6 @@ const Camera camera = Camera(25.0f, 0.0f, 10.0f, vec3(13.0f, 2.0f, -3.0f), vec3(
 vec3 calculateRayColor(in Ray ray);
 Viewport calculateViewport(const float aspectRatio);
 Ray getCameraRay(const Viewport viewport, const vec2 uv);
-uint getRandomSeed(const uint val0, const uint val1);
-float randomFloat();
-float randomInInterval(const float min, const float max);
 
 
 // MAIN
@@ -70,7 +38,7 @@ void main() {
     vec3 summedPixelColor = vec3(0.0f);
 
     for (uint i = 0; i < SAMPLES; i++) {
-        const vec2 uv = vec2(gl_LaunchIDEXT.x + randomFloat(), gl_LaunchIDEXT.y + randomFloat()) / size;
+        const vec2 uv = vec2(gl_LaunchIDEXT.x + randomFloat(payload.seed), gl_LaunchIDEXT.y + randomFloat(payload.seed)) / size;
         const Ray ray = getCameraRay(viewport, uv);
         summedPixelColor += calculateRayColor(ray);
     }
@@ -118,40 +86,11 @@ Viewport calculateViewport(const float aspectRatio) {
 }
 
 Ray getCameraRay(const Viewport viewport, const vec2 uv) {
-    const vec2 random = (camera.aperture / 2.0f) * normalize(vec2(randomInInterval(-1.0f, 1.0f), randomInInterval(-1.0f, 1.0f)));
+    const vec2 random = (camera.aperture / 2.0f) * normalize(vec2(randomInInterval(payload.seed, -1.0f, 1.0f), randomInInterval(payload.seed, -1.0f, 1.0f)));
     const vec3 offset = viewport.cameraRight * random.x + viewport.cameraUp * random.y;
 
     const vec3 from = camera.lookFrom + offset;
     const vec3 to = viewport.upperLeftCorner + viewport.horizontal * uv.x - viewport.vertical * uv.y;
 
     return Ray(from, normalize(to - from));
-}
-
-
-// RANDOM
-uint getRandomSeed(const uint val0, const uint val1) {
-    uint v0 = val0;
-    uint v1 = val1;
-    uint s0 = 0;
-
-    for (uint n = 0; n < 16; n++) {
-        s0 += 0x9e3779b9;
-        v0 += ((v1 << 4) + 0xa341316c) ^ (v1 + s0) ^ ((v1 >> 5) + 0xc8013ea4);
-        v1 += ((v0 << 4) + 0xad90777d) ^ (v0 + s0) ^ ((v0 >> 5) + 0x7e95761e);
-    }
-
-    return v0;
-}
-
-uint randomInt() {
-    payload.seed = 1664525 * payload.seed + 1013904223;
-    return payload.seed;
-}
-
-float randomFloat() {
-    return float(randomInt() & 0x00FFFFFFu) / float(0x01000000u);
-}
-
-float randomInInterval(const float min, const float max) {
-    return randomFloat() * (max - min) + min;
 }

@@ -1,23 +1,8 @@
 #version 460
 #extension GL_EXT_ray_tracing : require
 
-// STRUCTS
-struct Payload {
-    uint seed;
-
-    bool doesScatter;
-    vec3 attenuation;
-    vec3 scatterDirection;
-    vec3 pointOnSphere;
-};
-
-struct Sphere {
-    vec4 geometry;
-    uint materialType;
-    uint textureType;
-    vec4 colors[2];
-    float materialSpecificAttribute;
-};
+#include "random.glsl"
+#include "structs.glsl"
 
 
 // INPUTS
@@ -46,8 +31,6 @@ vec3 getScatterDirection(const Sphere sphere, const vec3 normal, const bool fron
 bool isVectorNearZero(const vec3 vector);
 bool canRefract(const vec3 vector, const vec3 normal, const float eta);
 float reflectanceFactor(const vec3 vector, const vec3 normal, const float eta);
-float randomFloat();
-vec3 randomUnitVector();
 
 
 // MAIN
@@ -82,7 +65,7 @@ vec4 getTextureColor(const Sphere sphere) {
 
 // MATERIAL
 vec3 getDiffuseScatterDirection(const Sphere sphere, const vec3 normal) {
-    vec3 scatterDirection = normal + randomUnitVector();
+    vec3 scatterDirection = normal + randomUnitVector(payload.seed);
 
     if (isVectorNearZero(scatterDirection)) {
         scatterDirection = normal;
@@ -93,7 +76,7 @@ vec3 getDiffuseScatterDirection(const Sphere sphere, const vec3 normal) {
 
 vec3 getMetalScatterDirection(const Sphere sphere, const vec3 normal) {
     const vec3 reflectedDirection = reflect(gl_WorldRayDirectionEXT, normal);
-    const vec3 fuzzDireciton = sphere.materialSpecificAttribute * randomUnitVector();
+    const vec3 fuzzDireciton = sphere.materialSpecificAttribute * randomUnitVector(payload.seed);
     const vec3 scatterDirection = normalize(reflectedDirection + fuzzDireciton);
 
     const bool doesScatter = dot(scatterDirection, normal) > 0.0f;
@@ -106,7 +89,7 @@ vec3 getMetalScatterDirection(const Sphere sphere, const vec3 normal) {
 
 vec3 getRefractiveScatterDirection(const Sphere sphere, const vec3 normal, const bool frontFace) {
     const float eta = frontFace ? (1.0f / sphere.materialSpecificAttribute) : sphere.materialSpecificAttribute;
-    const bool doesRefract = canRefract(gl_WorldRayDirectionEXT, normal, eta) && reflectanceFactor(gl_WorldRayDirectionEXT, normal, eta) < randomFloat();
+    const bool doesRefract = canRefract(gl_WorldRayDirectionEXT, normal, eta) && reflectanceFactor(gl_WorldRayDirectionEXT, normal, eta) < randomFloat(payload.seed);
 
     if (doesRefract) {
         return refract(gl_WorldRayDirectionEXT, normal, eta);
@@ -146,27 +129,4 @@ bool canRefract(const vec3 vector, const vec3 normal, const float eta) {
 float reflectanceFactor(const vec3 vector, const vec3 normal, const float eta) {
     const float r = pow((1.0f - eta) / (1.0f + eta), 2.0f);
     return r + (1.0f - r) * pow(1.0f - dot(-vector, normal), 5.0f);
-}
-
-
-// RANDOM
-uint randomInt() {
-    payload.seed = 1664525 * payload.seed + 1013904223;
-    return payload.seed;
-}
-
-float randomFloat() {
-    return float(randomInt() & 0x00FFFFFFu) / float(0x01000000u);
-}
-
-float randomInInterval(const float min, const float max) {
-    return randomFloat() * (max - min) + min;
-}
-
-vec3 randomVector(const float min, const float max) {
-    return vec3(randomInInterval(min, max), randomInInterval(min, max), randomInInterval(min, max));
-}
-
-vec3 randomUnitVector() {
-    return normalize(randomVector(-1.0f, 1.0f));
 }
