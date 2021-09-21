@@ -494,10 +494,10 @@ void Vulkan::createPipelineLayout() {
 }
 
 void Vulkan::createRTPipeline() {
-    vk::ShaderModule raygenModule = createShaderModule("shader.rgen.spv");
-    vk::ShaderModule intModule = createShaderModule("shader.rint.spv");
-    vk::ShaderModule chitModule = createShaderModule("shader.rchit.spv");
-    vk::ShaderModule missModule = createShaderModule("shader.rmiss.spv");
+    vk::ShaderModule raygenModule = createShaderModule("shaders/shader.rgen.spv");
+    vk::ShaderModule intModule = createShaderModule("shaders/shader.rint.spv");
+    vk::ShaderModule chitModule = createShaderModule("shaders/shader.rchit.spv");
+    vk::ShaderModule missModule = createShaderModule("shaders/shader.rmiss.spv");
 
     std::vector<vk::PipelineShaderStageCreateInfo> stages = {
             {

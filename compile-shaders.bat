@@ -1,6 +1,6 @@
 Pushd "%~dp0"
 
-"%~dp0lib\VulkanSDK\1.2.189.2\Bin\glslc.exe" "%~dp0shaders\shader.rgen" -o "cmake-build-debug\shader.rgen.spv" --target-env=vulkan1.2
-"%~dp0lib\VulkanSDK\1.2.189.2\Bin\glslc.exe" "%~dp0shaders\shader.rint" -o "cmake-build-debug\shader.rint.spv" --target-env=vulkan1.2
-"%~dp0lib\VulkanSDK\1.2.189.2\Bin\glslc.exe" "%~dp0shaders\shader.rchit" -o "cmake-build-debug\shader.rchit.spv" --target-env=vulkan1.2
-"%~dp0lib\VulkanSDK\1.2.189.2\Bin\glslc.exe" "%~dp0shaders\shader.rmiss" -o "cmake-build-debug\shader.rmiss.spv" --target-env=vulkan1.2
+"%VULKAN_SDK%\Bin\glslc.exe" "%~dp0shaders\shader.rgen" -o "cmake-build-debug\shaders\shader.rgen.spv" --target-env=vulkan1.2
+"%VULKAN_SDK%\Bin\glslc.exe" "%~dp0shaders\shader.rint" -o "cmake-build-debug\shaders\shader.rint.spv" --target-env=vulkan1.2
+"%VULKAN_SDK%\Bin\glslc.exe" "%~dp0shaders\shader.rchit" -o "cmake-build-debug\shaders\shader.rchit.spv" --target-env=vulkan1.2
+"%VULKAN_SDK%\Bin\glslc.exe" "%~dp0shaders\shader.rmiss" -o "cmake-build-debug\shaders\shader.rmiss.spv" --target-env=vulkan1.2
