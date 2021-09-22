@@ -5,7 +5,7 @@
 #define VKFW_NO_STRUCT_CONSTRUCTORS
 
 #include <vulkan/vulkan.hpp>
-#include <vkfw/vkfw.hpp>
+#include <GLFW/glfw3.h>
 #include <functional>
 #include "vulkan_settings.h"
 #include "scene.h"
@@ -54,7 +54,6 @@ private:
     const vk::PresentModeKHR presentMode = vk::PresentModeKHR::eImmediate;
 
     const std::vector<const char*> requiredInstanceExtensions = {
-            VK_EXT_DEBUG_UTILS_EXTENSION_NAME,
             VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME,
     };
 
@@ -71,7 +70,7 @@ private:
     };
 
 
-    vkfw::Window window;
+    GLFWwindow* window;
     vk::Instance instance;
     vk::SurfaceKHR surface;
     vk::PhysicalDevice physicalDevice;

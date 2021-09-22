@@ -1,0 +1,12 @@
+[submodule "lib/glm"]
+	path = lib/glm
+	url = https://github.com/g-truc/glm
+[submodule "lib/stb"]
+	path = lib/stb
+	url = https://github.com/nothings/stb
+[submodule "lib/Vulkan-Headers"]
+	path = lib/Vulkan-Headers
+	url = https://github.com/KhronosGroup/Vulkan-Headers
+[submodule "lib/glfw"]
+	path = lib/glfw
+	url = https://github.com/glfw/glfw
