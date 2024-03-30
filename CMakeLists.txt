@@ -23,7 +23,6 @@ add_executable(
         src/scene.cpp
         src/render_call_info.h
         ${CMAKE_CURRENT_BINARY_DIR}/include/shader_path.hpp
-        ${rgen_shader_path}
 )
 
 target_link_libraries(RayTracingGPUVulkan glfw Vulkan::Vulkan)
