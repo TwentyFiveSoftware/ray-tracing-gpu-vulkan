@@ -5,6 +5,7 @@
 #include <set>
 #include <fstream>
 #include <stb_image_write.h>
+#include "shader_path.hpp"
 
 Vulkan::Vulkan(VulkanSettings settings, Scene scene) :
         settings(settings), scene(scene), window(nullptr) {
@@ -504,10 +505,10 @@ void Vulkan::createPipelineLayout() {
 }
 
 void Vulkan::createRTPipeline() {
-    vk::ShaderModule raygenModule = createShaderModule("shaders/shader.rgen.spv");
-    vk::ShaderModule intModule = createShaderModule("shaders/shader.rint.spv");
-    vk::ShaderModule chitModule = createShaderModule("shaders/shader.rchit.spv");
-    vk::ShaderModule missModule = createShaderModule("shaders/shader.rmiss.spv");
+    vk::ShaderModule raygenModule = createShaderModule(rgen_shader_path);
+    vk::ShaderModule intModule = createShaderModule(rint_shader_path);
+    vk::ShaderModule chitModule = createShaderModule(rchit_shader_path);
+    vk::ShaderModule missModule = createShaderModule(rmiss_shader_path);
 
     std::vector<vk::PipelineShaderStageCreateInfo> stages = {
             {
