@@ -6,6 +6,7 @@
 #include <fstream>
 #include <stb_image_write.h>
 #include "shader_path.hpp"
+#include <algorithm>
 
 Vulkan::Vulkan(VulkanSettings settings, Scene scene) :
         settings(settings), scene(scene), window(nullptr) {
@@ -49,7 +50,7 @@ Vulkan::Vulkan(VulkanSettings settings, Scene scene) :
 }
 
 Vulkan::~Vulkan() {
-    device.destroySemaphore(semaphore);
+    std::ranges::for_each(semaphores, [this](auto semaphore) {device.destroySemaphore(semaphore); });
     device.destroyFence(fence);
 
     device.destroyPipeline(rtPipeline);
@@ -65,7 +66,7 @@ Vulkan::~Vulkan() {
     destroyBuffer(shaderBindingTableBuffer);
     destroyBuffer(renderCallInfoBuffer);
 
-    device.destroyImageView(swapChainImageView);
+    std::ranges::for_each(swapChainImageViews, [this](auto swapChainImageView) {device.destroyImageView(swapChainImageView); });
     device.destroySwapchainKHR(swapChain);
     device.destroyCommandPool(commandPool);
 
@@ -87,13 +88,23 @@ void Vulkan::update() {
 void Vulkan::render(const RenderCallInfo &renderCallInfo) {
     updateRenderCallInfoBuffer(renderCallInfo);
 
-    uint32_t swapChainImageIndex = device.acquireNextImageKHR(swapChain, UINT64_MAX, semaphore).value;
+    uint32_t swapChainImageIndex = 0;
+    auto semaphore = *semaphores.begin();
+    semaphores.pop_front();
+    semaphores.push_back(semaphore);
+    while (true)
+    {
+        if (auto [result, index] = device.acquireNextImageKHR(swapChain, UINT64_MAX, semaphore); result == vk::Result::eSuccess) {
+            swapChainImageIndex = index;
+            break;
+        }
+    }
 
     device.resetFences(fence);
 
     vk::SubmitInfo submitInfo = {
             .commandBufferCount = 1,
-            .pCommandBuffers = &commandBuffer
+            .pCommandBuffers = &commandBuffers[swapChainImageIndex]
     };
 
     computeQueue.submit(1, &submitInfo, fence);
@@ -110,6 +121,11 @@ void Vulkan::render(const RenderCallInfo &renderCallInfo) {
     };
 
     presentQueue.presentKHR(presentInfo);
+    vk::SubmitInfo wait_to_present = {
+    };
+    presentQueue.submit(wait_to_present, fence);
+    device.waitForFences(1, &fence, true, UINT64_MAX);
+    device.resetFences(fence);
 }
 
 bool Vulkan::shouldExit() const {
@@ -144,7 +160,7 @@ void Vulkan::createInstance() {
             .applicationVersion = 1,
             .pEngineName = "Ray Tracing (Vulkan)",
             .engineVersion = 1,
-            .apiVersion = VK_API_VERSION_1_2
+            .apiVersion = VK_API_VERSION_1_3
     };
 
     std::vector<const char*> enabledExtensions;
@@ -196,13 +212,14 @@ void Vulkan::createSurface() {
 }
 
 void Vulkan::pickPhysicalDevice() {
-    std::vector<vk::PhysicalDevice> physicalDevices = instance.enumeratePhysicalDevices();
+    std::vector<vk::PhysicalDevice> allPhysicalDevices = instance.enumeratePhysicalDevices();
 
-    if (physicalDevices.empty()) {
+    if (allPhysicalDevices.empty()) {
         throw std::runtime_error("No GPU with Vulkan support found!");
     }
 
-    for (const vk::PhysicalDevice &d: physicalDevices) {
+    std::vector<vk::PhysicalDevice> withRequiredExtensionsPhysicalDevices{};
+    for (const vk::PhysicalDevice &d: allPhysicalDevices) {
         std::vector<vk::ExtensionProperties> availableExtensions = d.enumerateDeviceExtensionProperties();
         std::set<std::string> requiredExtensions(requiredDeviceExtensions.begin(), requiredDeviceExtensions.end());
 
@@ -211,9 +228,20 @@ void Vulkan::pickPhysicalDevice() {
         }
 
         if (requiredExtensions.empty()) {
+            withRequiredExtensionsPhysicalDevices.push_back(d);
+        }
+    }
+
+    for (const vk::PhysicalDevice& d : withRequiredExtensionsPhysicalDevices) {
+        if (d.getProperties().deviceType == vk::PhysicalDeviceType::eDiscreteGpu) {
             physicalDevice = d;
             return;
         }
+    }
+
+    if (withRequiredExtensionsPhysicalDevices.size() > 0) {
+        physicalDevice = withRequiredExtensionsPhysicalDevices[0];
+        return;
     }
 
     throw std::runtime_error("No GPU supporting all required features found!");
@@ -305,16 +333,18 @@ void Vulkan::createCommandPool() {
 }
 
 void Vulkan::createSwapChain() {
+    auto surface_capabilities = physicalDevice.getSurfaceCapabilitiesKHR(surface);
+    swapChainExtent = surface_capabilities.currentExtent;
     vk::SwapchainCreateInfoKHR swapChainCreateInfo = {
             .surface = surface,
-            .minImageCount = 1,
+            .minImageCount = surface_capabilities.minImageCount,
             .imageFormat = swapChainImageFormat,
             .imageColorSpace = colorSpace,
-            .imageExtent = {.width = settings.windowWidth, .height = settings.windowHeight},
+            .imageExtent = swapChainExtent,
             .imageArrayLayers = 1,
             .imageUsage = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransferDst,
             .imageSharingMode = vk::SharingMode::eExclusive,
-            .preTransform = physicalDevice.getSurfaceCapabilitiesKHR(surface).currentTransform,
+            .preTransform = surface_capabilities.currentTransform,
             .compositeAlpha = vk::CompositeAlphaFlagBitsKHR::eOpaque,
             .presentMode = presentMode,
             .clipped = true,
@@ -324,9 +354,13 @@ void Vulkan::createSwapChain() {
     swapChain = device.createSwapchainKHR(swapChainCreateInfo);
 
     // swap chain images
-    std::vector<vk::Image> swapChainImages = device.getSwapchainImagesKHR(swapChain);
-    swapChainImage = swapChainImages.front();
-    swapChainImageView = createImageView(swapChainImage, swapChainImageFormat);
+    swapChainImages = device.getSwapchainImagesKHR(swapChain);
+    swapChainImageViews.resize(swapChainImages.size());
+    std::ranges::transform(swapChainImages, swapChainImageViews.begin(),
+        [this](auto swapChainImage) {
+            return createImageView(swapChainImage, swapChainImageFormat);
+        }
+    );
 }
 
 vk::ImageView Vulkan::createImageView(const vk::Image &image, const vk::Format &format) const {
@@ -599,92 +633,97 @@ std::vector<char> Vulkan::readBinaryFile(const std::string &path) {
 }
 
 void Vulkan::createCommandBuffer() {
-    commandBuffer = device.allocateCommandBuffers(
+    commandBuffers.resize(swapChainImages.size());
+    for (int swapChainImageIndex = 0; swapChainImageIndex < swapChainImages.size(); swapChainImageIndex++) {
+        auto& commandBuffer = commandBuffers[swapChainImageIndex];
+        auto& swapChainImage = swapChainImages[swapChainImageIndex];
+        commandBuffer = device.allocateCommandBuffers(
             {
                     .commandPool = commandPool,
                     .level = vk::CommandBufferLevel::ePrimary,
                     .commandBufferCount = 1
             }).front();
 
-    vk::CommandBufferBeginInfo beginInfo = {};
-    commandBuffer.begin(&beginInfo);
+        vk::CommandBufferBeginInfo beginInfo = {};
+        commandBuffer.begin(&beginInfo);
 
-    // RENDER TARGET IMAGE & SUMMED PIXEL COLOR IMAGE: UNDEFINED -> GENERAL
-    vk::ImageMemoryBarrier imageBarriersToGeneral[2] = {
-            getImagePipelineBarrier(
-                    vk::AccessFlagBits::eNoneKHR, vk::AccessFlagBits::eShaderWrite,
-                    vk::ImageLayout::eUndefined, vk::ImageLayout::eGeneral, renderTargetImage.image),
-            getImagePipelineBarrier(
-                    vk::AccessFlagBits::eNoneKHR, vk::AccessFlagBits::eShaderWrite,
-                    vk::ImageLayout::eUndefined, vk::ImageLayout::eGeneral, summedPixelColorImage.image)
-    };
+        // RENDER TARGET IMAGE & SUMMED PIXEL COLOR IMAGE: UNDEFINED -> GENERAL
+        vk::ImageMemoryBarrier imageBarriersToGeneral[2] = {
+                getImagePipelineBarrier(
+                        vk::AccessFlagBits::eNoneKHR, vk::AccessFlagBits::eShaderWrite,
+                        vk::ImageLayout::eUndefined, vk::ImageLayout::eGeneral, renderTargetImage.image),
+                getImagePipelineBarrier(
+                        vk::AccessFlagBits::eNoneKHR, vk::AccessFlagBits::eShaderWrite,
+                        vk::ImageLayout::eUndefined, vk::ImageLayout::eGeneral, summedPixelColorImage.image)
+        };
 
-    commandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eRayTracingShaderKHR,
-                                  vk::PipelineStageFlagBits::eRayTracingShaderKHR,
-                                  vk::DependencyFlagBits::eByRegion, 0, nullptr,
-                                  0, nullptr, 2, imageBarriersToGeneral);
-
-
-    // RAY TRACING
-    commandBuffer.bindPipeline(vk::PipelineBindPoint::eRayTracingKHR, rtPipeline);
-
-    std::vector<vk::DescriptorSet> descriptorSets = {rtDescriptorSet};
-    commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eRayTracingKHR, rtPipelineLayout,
-                                     0, descriptorSets, nullptr);
-
-    commandBuffer.traceRaysKHR(sbtRayGenAddressRegion, sbtMissAddressRegion, sbtHitAddressRegion, {},
-                               settings.windowWidth, settings.windowHeight, 1, dynamicDispatchLoader);
+        commandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eRayTracingShaderKHR,
+            vk::PipelineStageFlagBits::eRayTracingShaderKHR,
+            vk::DependencyFlagBits::eByRegion, 0, nullptr,
+            0, nullptr, 2, imageBarriersToGeneral);
 
 
-    // RENDER TARGET IMAGE: GENERAL -> TRANSFER SRC & SWAP CHAIN IMAGE: UNDEFINED -> TRANSFER DST
-    vk::ImageMemoryBarrier imageBarriersToTransfer[2] = {
-            getImagePipelineBarrier(
-                    vk::AccessFlagBits::eShaderWrite, vk::AccessFlagBits::eTransferRead,
-                    vk::ImageLayout::eGeneral, vk::ImageLayout::eTransferSrcOptimal, renderTargetImage.image),
-            getImagePipelineBarrier(
-                    vk::AccessFlagBits::eNoneKHR, vk::AccessFlagBits::eTransferWrite,
-                    vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal, swapChainImage)
-    };
+        // RAY TRACING
+        commandBuffer.bindPipeline(vk::PipelineBindPoint::eRayTracingKHR, rtPipeline);
 
-    commandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eRayTracingShaderKHR, vk::PipelineStageFlagBits::eTransfer,
-                                  vk::DependencyFlagBits::eByRegion, 0, nullptr,
-                                  0, nullptr, 2, imageBarriersToTransfer);
+        std::vector<vk::DescriptorSet> descriptorSets = { rtDescriptorSet };
+        commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eRayTracingKHR, rtPipelineLayout,
+            0, descriptorSets, nullptr);
+
+        commandBuffer.traceRaysKHR(sbtRayGenAddressRegion, sbtMissAddressRegion, sbtHitAddressRegion, {},
+            settings.windowWidth, settings.windowHeight, 1, dynamicDispatchLoader);
 
 
-    // COPY RENDER TARGET IMAGE TO SWAP CHAIN IMAGE
-    vk::ImageSubresourceLayers subresourceLayers = {
-            .aspectMask = vk::ImageAspectFlagBits::eColor,
-            .mipLevel = 0,
-            .baseArrayLayer = 0,
-            .layerCount = 1
-    };
+        // RENDER TARGET IMAGE: GENERAL -> TRANSFER SRC & SWAP CHAIN IMAGE: UNDEFINED -> TRANSFER DST
+        vk::ImageMemoryBarrier imageBarriersToTransfer[2] = {
+                getImagePipelineBarrier(
+                        vk::AccessFlagBits::eShaderWrite, vk::AccessFlagBits::eTransferRead,
+                        vk::ImageLayout::eGeneral, vk::ImageLayout::eTransferSrcOptimal, renderTargetImage.image),
+                getImagePipelineBarrier(
+                        vk::AccessFlagBits::eNoneKHR, vk::AccessFlagBits::eTransferWrite,
+                        vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal, swapChainImage)
+        };
 
-    vk::ImageCopy imageCopy = {
-            .srcSubresource = subresourceLayers,
-            .srcOffset = {0, 0, 0},
-            .dstSubresource = subresourceLayers,
-            .dstOffset = {0, 0, 0},
-            .extent = {
-                    .width = settings.windowWidth,
-                    .height = settings.windowHeight,
-                    .depth = 1
-            }
-    };
-
-    commandBuffer.copyImage(renderTargetImage.image, vk::ImageLayout::eTransferSrcOptimal, swapChainImage,
-                            vk::ImageLayout::eTransferDstOptimal, 1, &imageCopy);
+        commandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eRayTracingShaderKHR, vk::PipelineStageFlagBits::eTransfer,
+            vk::DependencyFlagBits::eByRegion, 0, nullptr,
+            0, nullptr, 2, imageBarriersToTransfer);
 
 
-    // SWAP CHAIN IMAGE: TRANSFER DST -> PRESENT
-    vk::ImageMemoryBarrier barrierSwapChainToPresent = getImagePipelineBarrier(
+        // COPY RENDER TARGET IMAGE TO SWAP CHAIN IMAGE
+        vk::ImageSubresourceLayers subresourceLayers = {
+                .aspectMask = vk::ImageAspectFlagBits::eColor,
+                .mipLevel = 0,
+                .baseArrayLayer = 0,
+                .layerCount = 1
+        };
+
+        vk::ImageCopy imageCopy = {
+                .srcSubresource = subresourceLayers,
+                .srcOffset = {0, 0, 0},
+                .dstSubresource = subresourceLayers,
+                .dstOffset = {0, 0, 0},
+                .extent = {
+                        .width = swapChainExtent.width,
+                        .height = swapChainExtent.height,
+                        .depth = 1
+                }
+        };
+
+        commandBuffer.copyImage(renderTargetImage.image, vk::ImageLayout::eTransferSrcOptimal, swapChainImage,
+            vk::ImageLayout::eTransferDstOptimal, 1, &imageCopy);
+
+
+        // SWAP CHAIN IMAGE: TRANSFER DST -> PRESENT
+        vk::ImageMemoryBarrier barrierSwapChainToPresent = getImagePipelineBarrier(
             vk::AccessFlagBits::eTransferWrite, vk::AccessFlagBits::eMemoryRead,
             vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::ePresentSrcKHR, swapChainImage);
 
-    commandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eTransfer,
-                                  vk::DependencyFlagBits::eByRegion, 0, nullptr,
-                                  0, nullptr, 1, &barrierSwapChainToPresent);
+        commandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eTransfer,
+            vk::DependencyFlagBits::eByRegion, 0, nullptr,
+            0, nullptr, 1, &barrierSwapChainToPresent);
 
-    commandBuffer.end();
+        commandBuffer.end();
+    }
 }
 
 void Vulkan::createFence() {
@@ -692,7 +731,10 @@ void Vulkan::createFence() {
 }
 
 void Vulkan::createSemaphore() {
-    semaphore = device.createSemaphore({});
+    semaphores.resize(swapChainImages.size());
+    std::ranges::for_each(semaphores, [this](auto& semaphore) {
+        semaphore = device.createSemaphore({});
+        });
 }
 
 uint32_t Vulkan::findMemoryTypeIndex(const uint32_t &memoryTypeBits, const vk::MemoryPropertyFlags &properties) {
@@ -895,7 +937,8 @@ void Vulkan::createBottomAccelerationStructure() {
 
     // ALLOCATE BUFFERS FOR ACCELERATION STRUCTURE
     bottomAccelerationStructure.structureBuffer = createBuffer(buildSizesInfo.accelerationStructureSize,
-                                                               vk::BufferUsageFlagBits::eAccelerationStructureStorageKHR,
+                                                               vk::BufferUsageFlagBits::eAccelerationStructureStorageKHR |
+        vk::BufferUsageFlagBits::eShaderDeviceAddress,
                                                                vk::MemoryPropertyFlagBits::eDeviceLocal);
 
     bottomAccelerationStructure.scratchBuffer = createBuffer(buildSizesInfo.buildScratchSize,
