@@ -84,8 +84,9 @@ private:
     vk::CommandPool commandPool;
 
     vk::SwapchainKHR swapChain;
-    vk::Image swapChainImage;
-    vk::ImageView swapChainImageView;
+    vk::Extent2D swapChainExtent;
+    std::vector<vk::Image> swapChainImages;
+    std::vector<vk::ImageView> swapChainImageViews;
 
     vk::DescriptorSetLayout rtDescriptorSetLayout;
     vk::DescriptorPool rtDescriptorPool;
@@ -93,10 +94,10 @@ private:
     vk::PipelineLayout rtPipelineLayout;
     vk::Pipeline rtPipeline;
 
-    vk::CommandBuffer commandBuffer;
+    std::vector<vk::CommandBuffer> commandBuffers;
 
     vk::Fence fence;
-    vk::Semaphore semaphore;
+    std::list<vk::Semaphore> semaphores;
 
     VulkanImage renderTargetImage;
     VulkanImage summedPixelColorImage;
