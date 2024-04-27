@@ -55,6 +55,7 @@ private:
 
     const std::vector<const char*> requiredInstanceExtensions = {
             VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME,
+            VK_EXT_DEBUG_UTILS_EXTENSION_NAME,
     };
 
     const std::vector<const char*> requiredDeviceExtensions = {
