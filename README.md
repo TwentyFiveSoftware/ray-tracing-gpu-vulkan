@@ -21,6 +21,24 @@ render the scene. Using this extension over a compute shader approach has two ma
 *For more in-depth details visit the official Vulkan ray tracing extension
 guide [here](https://github.com/KhronosGroup/Vulkan-Guide/blob/master/chapters/extensions/ray_tracing.adoc).*
 
+## Build & Run this project
+
+1. Install [Vulkan SDK](https://vulkan.lunarg.com/sdk/home)
+2. Clone the repository
+3. Initialize git submodules (dependencies)
+	```sh
+	git submodule update --init --recursive
+	```
+4. Build the project
+   ```sh
+   cmake -S . -B build
+   cmake --build build --config Release
+   ```
+4. Run the executable
+   ```sh
+   ./build/Release/RayTracingGPUVulkan.exe
+   ```
+
 ## My Ray Tracing series
 
 This is the final part of my 3 project series. Before this project, I followed Peter Shirley' Ray Tracing series and
