@@ -49,7 +49,7 @@ private:
     std::vector<vk::AabbPositionsKHR> aabbs;
 
     const vk::Format swapChainImageFormat = vk::Format::eR8G8B8A8Unorm;
-    const vk::Format summedPixelColorImageFormat = vk::Format::eR16G16B16A16Unorm;
+    const vk::Format summedPixelColorImageFormat = vk::Format::eR32G32B32A32Sfloat;
     const vk::ColorSpaceKHR colorSpace = vk::ColorSpaceKHR::eSrgbNonlinear;
     const vk::PresentModeKHR presentMode = vk::PresentModeKHR::eImmediate;
 

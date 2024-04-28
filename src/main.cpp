@@ -5,8 +5,8 @@
 
 int main() {
     // SETUP
-    const uint32_t renderCalls = 50;
-    const uint32_t samples = 10000;
+    const uint32_t renderCalls = 50000;
+    const uint32_t samples = 1000000;
 
     VulkanSettings settings = {
             .windowWidth = 1920,
