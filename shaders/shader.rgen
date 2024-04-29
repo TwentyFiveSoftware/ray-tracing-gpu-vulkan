@@ -12,8 +12,7 @@ layout(binding = 1) uniform accelerationStructureEXT accelerationStructure;
 layout(binding = 3, rgba32f) uniform image2D summedPixelColorImage;
 layout(binding = 4) uniform RenderCallInfo {
     uint number;
-    uint totalRenderCalls;
-    uint totalSamples;
+    uint samplesPerRenderCall;
 } renderCallInfo;
 
 layout(location = 0) rayPayloadEXT Payload payload;
@@ -40,12 +39,11 @@ void main() {
     const float aspectRatio = size.x / size.y;
 
     const Viewport viewport = calculateViewport(aspectRatio);
-    const uint samplesPerCall = renderCallInfo.totalSamples / renderCallInfo.totalRenderCalls;
 
     vec3 summedPixelColor = imageLoad(summedPixelColorImage, ivec2(gl_LaunchIDEXT.xy)).rgb;
 
     dvec3 sum = summedPixelColor;
-    for (uint i = 0; i < samplesPerCall; i++) {
+    for (uint i = 0; i < renderCallInfo.samplesPerRenderCall; i++) {
         const vec2 uv = vec2(gl_LaunchIDEXT.x + randomFloat(payload.seed), gl_LaunchIDEXT.y + randomFloat(payload.seed)) / size;
         const Ray ray = getCameraRay(viewport, uv);
         sum += calculateRayColor(ray);
@@ -54,7 +52,7 @@ void main() {
 
     imageStore(summedPixelColorImage, ivec2(gl_LaunchIDEXT.xy), vec4(summedPixelColor, 1.0f));
 
-    const vec3 pixelColor = sqrt(summedPixelColor / float(renderCallInfo.number * samplesPerCall));
+    const vec3 pixelColor = sqrt(summedPixelColor / float(renderCallInfo.number * renderCallInfo.samplesPerRenderCall));
     imageStore(renderTarget, ivec2(gl_LaunchIDEXT.xy), vec4(pixelColor, 1.0f));
 }
 
