@@ -92,12 +92,12 @@ void Vulkan::render(const RenderCallInfo &renderCallInfo) {
     auto semaphore = *semaphores.begin();
     semaphores.pop_front();
     semaphores.push_back(semaphore);
-    while (true)
-    {
-        if (auto [result, index] = device.acquireNextImageKHR(swapChain, UINT64_MAX, semaphore); result == vk::Result::eSuccess) {
+    if (auto [result, index] = device.acquireNextImageKHR(swapChain, UINT64_MAX, semaphore);
+        result == vk::Result::eSuccess || result == vk::Result::eSuboptimalKHR) {
             swapChainImageIndex = index;
-            break;
-        }
+    }
+    else {
+        throw std::runtime_error{ "failed to acquire next image" };
     }
 
     device.resetFences(fence);

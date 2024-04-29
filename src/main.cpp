@@ -2,11 +2,16 @@
 #include <thread>
 #include <iostream>
 #include "vulkan.h"
+#include <string>
 
-int main() {
+int main(int argc, const char** argv) {
     // SETUP
-    const uint32_t renderCalls = 50;
-    const uint32_t samples = 10000;
+    uint32_t renderCalls = 50;
+    uint32_t samples = 10000;
+    if (argc == 3) {
+        std::from_chars(argv[1], argv[1] + strlen(argv[1]), samples);
+        std::from_chars(argv[2], argv[2] + strlen(argv[2]), renderCalls);
+    }
 
     VulkanSettings settings = {
             .windowWidth = 1920,
