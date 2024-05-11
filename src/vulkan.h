@@ -100,8 +100,28 @@ private:
     std::vector<vk::CommandBuffer> commandBuffers;
     std::vector<vk::CommandBuffer> commandBuffersForNoPresent;
 
-    vk::Fence fence;
-    std::list<vk::Semaphore> semaphores;
+    std::vector<vk::Fence> m_fences;
+    auto get_fence(uint32_t image_index) {
+        return m_fences[image_index];
+    }
+
+    // There is swapchain image count + 1 semaphores
+    // So that we could get a free semaphore.
+    std::vector<vk::Semaphore> m_acquire_next_image_semaphores;
+    uint32_t m_acquire_next_image_free_semaphore_index;
+    std::vector<uint32_t> m_acquire_next_image_semaphores_indices;
+    auto get_acquire_next_image_semaphore() {
+        return m_acquire_next_image_semaphores[m_acquire_next_image_free_semaphore_index];
+    }
+    auto free_acquire_next_image_semaphore(uint32_t image_index) {
+        std::swap(m_acquire_next_image_free_semaphore_index, m_acquire_next_image_semaphores_indices[image_index]);
+    }
+
+    // Semaphore for swapchain present.
+    std::vector<vk::Semaphore> m_render_image_semaphores;
+    auto get_render_image_semaphore(uint32_t image_index) {
+        return m_render_image_semaphores[image_index];
+    }
 
     VulkanImage renderTargetImage;
     VulkanImage summedPixelColorImage;
