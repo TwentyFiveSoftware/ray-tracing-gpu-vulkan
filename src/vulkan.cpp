@@ -87,49 +87,66 @@ void Vulkan::update() {
 
 void Vulkan::render(const RenderCallInfo &renderCallInfo) {
     updateRenderCallInfoBuffer(renderCallInfo);
+    if (is_window_minimized()) {
+        vk::SubmitInfo submitInfo = {
+                .commandBufferCount = 1,
+                .pCommandBuffers = &commandBuffersForNoPresent[0]
+        };
 
-    uint32_t swapChainImageIndex = 0;
-    auto semaphore = *semaphores.begin();
-    semaphores.pop_front();
-    semaphores.push_back(semaphore);
-    if (auto [result, index] = device.acquireNextImageKHR(swapChain, UINT64_MAX, semaphore);
-        result == vk::Result::eSuccess || result == vk::Result::eSuboptimalKHR) {
-            swapChainImageIndex = index;
+        computeQueue.submit(1, &submitInfo, fence);
+
+        device.waitForFences(1, &fence, true, UINT64_MAX);
+        device.resetFences(fence);
     }
     else {
-        throw std::runtime_error{ "failed to acquire next image" };
+        uint32_t swapChainImageIndex = 0;
+        auto semaphore = *semaphores.begin();
+        semaphores.pop_front();
+        semaphores.push_back(semaphore);
+        if (auto [result, index] = device.acquireNextImageKHR(swapChain, UINT64_MAX, semaphore);
+            result == vk::Result::eSuccess || result == vk::Result::eSuboptimalKHR) {
+            swapChainImageIndex = index;
+        }
+        else {
+            throw std::runtime_error{ "failed to acquire next image" };
+        }
+
+        device.resetFences(fence);
+
+        vk::SubmitInfo submitInfo = {
+                .commandBufferCount = 1,
+                .pCommandBuffers = &commandBuffers[swapChainImageIndex]
+        };
+
+        computeQueue.submit(1, &submitInfo, fence);
+
+        device.waitForFences(1, &fence, true, UINT64_MAX);
+        device.resetFences(fence);
+
+        vk::PresentInfoKHR presentInfo = {
+                .waitSemaphoreCount = 1,
+                .pWaitSemaphores = &semaphore,
+                .swapchainCount = 1,
+                .pSwapchains = &swapChain,
+                .pImageIndices = &swapChainImageIndex
+        };
+
+        presentQueue.presentKHR(presentInfo);
+        vk::SubmitInfo wait_to_present = {
+        };
+        presentQueue.submit(wait_to_present, fence);
+        device.waitForFences(1, &fence, true, UINT64_MAX);
+        device.resetFences(fence);
     }
-
-    device.resetFences(fence);
-
-    vk::SubmitInfo submitInfo = {
-            .commandBufferCount = 1,
-            .pCommandBuffers = &commandBuffers[swapChainImageIndex]
-    };
-
-    computeQueue.submit(1, &submitInfo, fence);
-
-    device.waitForFences(1, &fence, true, UINT64_MAX);
-    device.resetFences(fence);
-
-    vk::PresentInfoKHR presentInfo = {
-            .waitSemaphoreCount = 1,
-            .pWaitSemaphores = &semaphore,
-            .swapchainCount = 1,
-            .pSwapchains = &swapChain,
-            .pImageIndices = &swapChainImageIndex
-    };
-
-    presentQueue.presentKHR(presentInfo);
-    vk::SubmitInfo wait_to_present = {
-    };
-    presentQueue.submit(wait_to_present, fence);
-    device.waitForFences(1, &fence, true, UINT64_MAX);
-    device.resetFences(fence);
 }
 
 bool Vulkan::shouldExit() const {
     return glfwWindowShouldClose(window);
+}
+
+std::map<GLFWwindow*, Vulkan*> Vulkan::m_window_this{};
+void Vulkan::window_size_callback(GLFWwindow* window, int width, int height) {
+    m_window_this[window]->size_changed(width, height);
 }
 
 void Vulkan::createWindow() {
@@ -138,6 +155,8 @@ void Vulkan::createWindow() {
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     window = glfwCreateWindow(settings.windowWidth, settings.windowHeight, "GPU Ray Tracing (Vulkan)",
                               nullptr, nullptr);
+    m_window_this.emplace(window, this);
+    glfwSetWindowSizeCallback(window, window_size_callback);
 }
 
 VKAPI_ATTR VkBool32 VKAPI_CALL debugMessageFunc(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
@@ -724,6 +743,46 @@ void Vulkan::createCommandBuffer() {
 
         commandBuffer.end();
     }
+    commandBuffersForNoPresent.resize(1);
+    auto& commandBuffer = commandBuffersForNoPresent[0];
+    commandBuffer = device.allocateCommandBuffers(
+        {
+                .commandPool = commandPool,
+                .level = vk::CommandBufferLevel::ePrimary,
+                .commandBufferCount = 1
+        }).front();
+
+    vk::CommandBufferBeginInfo beginInfo = {};
+    commandBuffer.begin(&beginInfo);
+
+    // RENDER TARGET IMAGE & SUMMED PIXEL COLOR IMAGE: UNDEFINED -> GENERAL
+    vk::ImageMemoryBarrier imageBarriersToGeneral[2] = {
+            getImagePipelineBarrier(
+                    vk::AccessFlagBits::eNoneKHR, vk::AccessFlagBits::eShaderWrite,
+                    vk::ImageLayout::eUndefined, vk::ImageLayout::eGeneral, renderTargetImage.image),
+            getImagePipelineBarrier(
+                    vk::AccessFlagBits::eNoneKHR, vk::AccessFlagBits::eShaderWrite,
+                    vk::ImageLayout::eUndefined, vk::ImageLayout::eGeneral, summedPixelColorImage.image)
+    };
+
+    commandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eRayTracingShaderKHR,
+        vk::PipelineStageFlagBits::eRayTracingShaderKHR,
+        vk::DependencyFlagBits::eByRegion, 0, nullptr,
+        0, nullptr, 2, imageBarriersToGeneral);
+
+
+    // RAY TRACING
+    commandBuffer.bindPipeline(vk::PipelineBindPoint::eRayTracingKHR, rtPipeline);
+
+    std::vector<vk::DescriptorSet> descriptorSets = { rtDescriptorSet };
+    commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eRayTracingKHR, rtPipelineLayout,
+        0, descriptorSets, nullptr);
+
+    commandBuffer.traceRaysKHR(sbtRayGenAddressRegion, sbtMissAddressRegion, sbtHitAddressRegion, {},
+        settings.windowWidth, settings.windowHeight, 1, dynamicDispatchLoader);
+
+    commandBuffer.end();
+
 }
 
 void Vulkan::createFence() {

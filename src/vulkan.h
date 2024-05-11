@@ -11,6 +11,8 @@
 #include "scene.h"
 #include "render_call_info.h"
 
+#include <map>
+
 struct VulkanImage {
     vk::Image image;
     vk::DeviceMemory memory;
@@ -96,6 +98,7 @@ private:
     vk::Pipeline rtPipeline;
 
     std::vector<vk::CommandBuffer> commandBuffers;
+    std::vector<vk::CommandBuffer> commandBuffersForNoPresent;
 
     vk::Fence fence;
     std::list<vk::Semaphore> semaphores;
@@ -114,7 +117,20 @@ private:
     VulkanBuffer sphereBuffer;
     VulkanBuffer renderCallInfoBuffer;
 
+    int m_width;
+    int m_height;
+
     void createWindow();
+
+    static std::map<GLFWwindow*, Vulkan*> m_window_this;
+    static void window_size_callback(GLFWwindow* window, int width, int height);
+    void size_changed(int width, int height) {
+        m_width = width;
+        m_height = height;
+    }
+    bool is_window_minimized() {
+        return m_width == 0 || m_height == 0;
+    }
 
     void createInstance();
 
