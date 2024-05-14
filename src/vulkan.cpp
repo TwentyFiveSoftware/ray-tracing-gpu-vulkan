@@ -51,7 +51,7 @@ Vulkan::Vulkan(VulkanSettings settings, Scene scene) :
 }
 
 Vulkan::~Vulkan() {
-    std::ranges::for_each(m_acquire_next_image_semaphores, [this](auto semaphore) {device.destroySemaphore(semaphore); });
+    std::ranges::for_each(m_next_image_semaphores, [this](auto semaphore) {device.destroySemaphore(semaphore); });
     std::ranges::for_each(m_render_image_semaphores, [this](auto semaphore) { device.destroySemaphore(semaphore); });
     std::ranges::for_each(m_fences, [this](auto fence) { device.destroyFence(fence); });
 
@@ -87,59 +87,58 @@ void Vulkan::update() {
     glfwPollEvents();
 }
 
-void Vulkan::render(const RenderCallInfo &renderCallInfo) {
+void Vulkan::render(const RenderCallInfo& renderCallInfo) {
     updateRenderCallInfoBuffer(renderCallInfo);
     if (is_window_minimized()) {
         device.waitForFences(1, &m_fences[0], true, UINT64_MAX);
         device.resetFences(m_fences[0]);
-        
+
         computeQueue.submit(vk::SubmitInfo{}.setCommandBuffers(commandBuffersForNoPresent[0]), m_fences[0]);
+        return;
+    }
+    uint32_t swapChainImageIndex = 0;
+    auto acquire_image_semaphore = get_acquire_image_semaphore();
+    if (auto [result, index] = device.acquireNextImageKHR(swapChain, UINT64_MAX, acquire_image_semaphore);
+        result == vk::Result::eSuccess || result == vk::Result::eSuboptimalKHR) {
+        swapChainImageIndex = index;
     }
     else {
-        uint32_t swapChainImageIndex = 0;
-        auto acquire_next_image_semaphore = get_acquire_next_image_semaphore();
-        if (auto [result, index] = device.acquireNextImageKHR(swapChain, UINT64_MAX, acquire_next_image_semaphore);
-            result == vk::Result::eSuccess || result == vk::Result::eSuboptimalKHR) {
-            swapChainImageIndex = index;
-        }
-        else {
-            throw std::runtime_error{ "failed to acquire next image" };
-        }
-        free_acquire_next_image_semaphore(swapChainImageIndex);
-
-        auto fence = get_fence(swapChainImageIndex);
-        {
-            vk::Result res = device.waitForFences(fence, true, UINT64_MAX);
-            if (res != vk::Result::eSuccess) {
-                throw std::runtime_error{ "failed to wait fences" };
-            }
-        }
-        device.resetFences(fence);
-
-        auto render_image_semaphore = get_render_image_semaphore(swapChainImageIndex);
-
-        auto wait_semaphores = std::array{ acquire_next_image_semaphore};
-        auto  wait_stage_masks =
-            std::array<vk::PipelineStageFlags,1>{ vk::PipelineStageFlagBits::eTransfer };
-        auto signal_semaphores = std::array{ render_image_semaphore };
-        auto submitInfo = vk::SubmitInfo{}
-            .setCommandBuffers(commandBuffers[swapChainImageIndex])
-            .setWaitSemaphores(wait_semaphores)
-            .setWaitDstStageMask(wait_stage_masks)
-            .setSignalSemaphores(signal_semaphores);
-
-        computeQueue.submit(1, &submitInfo, fence);
-
-        vk::PresentInfoKHR presentInfo = {
-                .waitSemaphoreCount = 1,
-                .pWaitSemaphores = &render_image_semaphore,
-                .swapchainCount = 1,
-                .pSwapchains = &swapChain,
-                .pImageIndices = &swapChainImageIndex
-        };
-
-        presentQueue.presentKHR(presentInfo);
+        throw std::runtime_error{ "failed to acquire next image" };
     }
+    free_acquire_image_semaphore(swapChainImageIndex);
+
+    auto fence = get_fence(swapChainImageIndex);
+    {
+        vk::Result res = device.waitForFences(fence, true, UINT64_MAX);
+        if (res != vk::Result::eSuccess) {
+            throw std::runtime_error{ "failed to wait fences" };
+        }
+    }
+    device.resetFences(fence);
+
+    auto render_image_semaphore = get_render_image_semaphore(swapChainImageIndex);
+
+    auto wait_semaphores = std::array{ acquire_image_semaphore };
+    auto  wait_stage_masks =
+        std::array<vk::PipelineStageFlags, 1>{ vk::PipelineStageFlagBits::eTransfer };
+    auto signal_semaphores = std::array{ render_image_semaphore };
+    auto submitInfo = vk::SubmitInfo{}
+        .setCommandBuffers(commandBuffers[swapChainImageIndex])
+        .setWaitSemaphores(wait_semaphores)
+        .setWaitDstStageMask(wait_stage_masks)
+        .setSignalSemaphores(signal_semaphores);
+
+    computeQueue.submit(1, &submitInfo, fence);
+
+    vk::PresentInfoKHR presentInfo = {
+            .waitSemaphoreCount = 1,
+            .pWaitSemaphores = &render_image_semaphore,
+            .swapchainCount = 1,
+            .pSwapchains = &swapChain,
+            .pImageIndices = &swapChainImageIndex
+    };
+
+    presentQueue.presentKHR(presentInfo);
 }
 
 bool Vulkan::shouldExit() const {
@@ -653,6 +652,18 @@ std::vector<char> Vulkan::readBinaryFile(const std::string &path) {
     return buffer;
 }
 
+void Vulkan::record_ray_tracing(vk::CommandBuffer commandBuffer) {
+    // RAY TRACING
+    commandBuffer.bindPipeline(vk::PipelineBindPoint::eRayTracingKHR, rtPipeline);
+
+    std::vector<vk::DescriptorSet> descriptorSets = { rtDescriptorSet };
+    commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eRayTracingKHR, rtPipelineLayout,
+        0, descriptorSets, nullptr);
+
+    commandBuffer.traceRaysKHR(sbtRayGenAddressRegion, sbtMissAddressRegion, sbtHitAddressRegion, {},
+        settings.windowWidth, settings.windowHeight, 1, dynamicDispatchLoader);
+}
+
 void Vulkan::createCommandBuffer() {
     commandBuffers.resize(swapChainImages.size());
     for (int swapChainImageIndex = 0; swapChainImageIndex < swapChainImages.size(); swapChainImageIndex++) {
@@ -683,17 +694,7 @@ void Vulkan::createCommandBuffer() {
             vk::DependencyFlagBits::eByRegion, 0, nullptr,
             0, nullptr, 2, imageBarriersToGeneral);
 
-
-        // RAY TRACING
-        commandBuffer.bindPipeline(vk::PipelineBindPoint::eRayTracingKHR, rtPipeline);
-
-        std::vector<vk::DescriptorSet> descriptorSets = { rtDescriptorSet };
-        commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eRayTracingKHR, rtPipelineLayout,
-            0, descriptorSets, nullptr);
-
-        commandBuffer.traceRaysKHR(sbtRayGenAddressRegion, sbtMissAddressRegion, sbtHitAddressRegion, {},
-            settings.windowWidth, settings.windowHeight, 1, dynamicDispatchLoader);
-
+        record_ray_tracing(commandBuffer);
 
         // RENDER TARGET IMAGE: GENERAL -> TRANSFER SRC & SWAP CHAIN IMAGE: UNDEFINED -> TRANSFER DST
         vk::ImageMemoryBarrier imageBarriersToTransfer[2] = {
@@ -774,16 +775,7 @@ void Vulkan::createCommandBuffer() {
                 vk::DependencyFlagBits::eByRegion, 0, nullptr,
                 0, nullptr, 2, imageBarriersToGeneral);
 
-
-            // RAY TRACING
-            commandBuffer.bindPipeline(vk::PipelineBindPoint::eRayTracingKHR, rtPipeline);
-
-            std::vector<vk::DescriptorSet> descriptorSets = { rtDescriptorSet };
-            commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eRayTracingKHR, rtPipelineLayout,
-                0, descriptorSets, nullptr);
-
-            commandBuffer.traceRaysKHR(sbtRayGenAddressRegion, sbtMissAddressRegion, sbtHitAddressRegion, {},
-                settings.windowWidth, settings.windowHeight, 1, dynamicDispatchLoader);
+            record_ray_tracing(commandBuffer);
 
             commandBuffer.end();
 
@@ -803,13 +795,13 @@ void Vulkan::createFence() {
 }
 
 void Vulkan::createSemaphore() {
-    m_acquire_next_image_semaphores.resize(swapChainImages.size()+1);
-    std::ranges::for_each(m_acquire_next_image_semaphores, [this](auto& semaphore) {
+    m_next_image_semaphores.resize(swapChainImages.size()+1);
+    std::ranges::for_each(m_next_image_semaphores, [this](auto& semaphore) {
         semaphore = device.createSemaphore({});
         });
-    m_acquire_next_image_semaphores_indices.resize(swapChainImages.size());
-    std::ranges::iota(m_acquire_next_image_semaphores_indices, 0);
-    m_acquire_next_image_free_semaphore_index = swapChainImages.size();
+    m_next_image_semaphores_indices.resize(swapChainImages.size());
+    std::ranges::iota(m_next_image_semaphores_indices, 0);
+    m_next_image_free_semaphore_index = swapChainImages.size();
 
     m_render_image_semaphores.resize(swapChainImages.size());
     std::ranges::transform(swapChainImages,

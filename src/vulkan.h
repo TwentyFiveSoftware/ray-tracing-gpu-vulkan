@@ -107,14 +107,14 @@ private:
 
     // There is swapchain image count + 1 semaphores
     // So that we could get a free semaphore.
-    std::vector<vk::Semaphore> m_acquire_next_image_semaphores;
-    uint32_t m_acquire_next_image_free_semaphore_index;
-    std::vector<uint32_t> m_acquire_next_image_semaphores_indices;
-    auto get_acquire_next_image_semaphore() {
-        return m_acquire_next_image_semaphores[m_acquire_next_image_free_semaphore_index];
+    std::vector<vk::Semaphore> m_next_image_semaphores;
+    uint32_t m_next_image_free_semaphore_index;
+    std::vector<uint32_t> m_next_image_semaphores_indices;
+    auto get_acquire_image_semaphore() {
+        return m_next_image_semaphores[m_next_image_free_semaphore_index];
     }
-    auto free_acquire_next_image_semaphore(uint32_t image_index) {
-        std::swap(m_acquire_next_image_free_semaphore_index, m_acquire_next_image_semaphores_indices[image_index]);
+    auto free_acquire_image_semaphore(uint32_t image_index) {
+        std::swap(m_next_image_free_semaphore_index, m_next_image_semaphores_indices[image_index]);
     }
 
     // Semaphore for swapchain present.
@@ -180,6 +180,7 @@ private:
 
     [[nodiscard]] static std::vector<char> readBinaryFile(const std::string &path);
 
+    void record_ray_tracing(vk::CommandBuffer cmd);
     void createCommandBuffer();
 
     void createFence();
