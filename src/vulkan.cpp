@@ -691,20 +691,13 @@ void Vulkan::createCommandBuffer() {
         vk::CommandBufferBeginInfo beginInfo = {};
         commandBuffer.begin(&beginInfo);
 
-        // RENDER TARGET IMAGE & SUMMED PIXEL COLOR IMAGE: UNDEFINED -> GENERAL
-        vk::ImageMemoryBarrier imageBarriersToGeneral[2] = {
-                getImagePipelineBarrier(
-                        vk::AccessFlagBits::eNoneKHR, vk::AccessFlagBits::eShaderWrite,
-                        vk::ImageLayout::eUndefined, vk::ImageLayout::eGeneral, renderTargetImage.image),
-                getImagePipelineBarrier(
-                        vk::AccessFlagBits::eNoneKHR, vk::AccessFlagBits::eShaderWrite,
-                        vk::ImageLayout::eUndefined, vk::ImageLayout::eGeneral, summedPixelColorImage.image)
-        };
-
+        // RENDER TARGET IMAGE UNDEFINED -> GENERAL
         commandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eRayTracingShaderKHR,
             vk::PipelineStageFlagBits::eRayTracingShaderKHR,
-            vk::DependencyFlagBits::eByRegion, 0, nullptr,
-            0, nullptr, 2, imageBarriersToGeneral);
+            vk::DependencyFlagBits::eByRegion, {}, {},
+            getImagePipelineBarrier(
+                vk::AccessFlagBits::eNoneKHR, vk::AccessFlagBits::eShaderWrite,
+                vk::ImageLayout::eUndefined, vk::ImageLayout::eGeneral, renderTargetImage.image));
 
         record_ray_tracing(commandBuffer, swapChainImageIndex);
 
@@ -772,20 +765,13 @@ void Vulkan::createCommandBuffer() {
             vk::CommandBufferBeginInfo beginInfo = {};
             commandBuffer.begin(&beginInfo);
 
-            // RENDER TARGET IMAGE & SUMMED PIXEL COLOR IMAGE: UNDEFINED -> GENERAL
-            vk::ImageMemoryBarrier imageBarriersToGeneral[2] = {
-                    getImagePipelineBarrier(
-                            vk::AccessFlagBits::eNoneKHR, vk::AccessFlagBits::eShaderWrite,
-                            vk::ImageLayout::eUndefined, vk::ImageLayout::eGeneral, renderTargetImage.image),
-                    getImagePipelineBarrier(
-                            vk::AccessFlagBits::eNoneKHR, vk::AccessFlagBits::eShaderWrite,
-                            vk::ImageLayout::eUndefined, vk::ImageLayout::eGeneral, summedPixelColorImage.image)
-            };
-
+            // RENDER TARGET IMAGE UNDEFINED -> GENERAL
             commandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eRayTracingShaderKHR,
                 vk::PipelineStageFlagBits::eRayTracingShaderKHR,
-                vk::DependencyFlagBits::eByRegion, 0, nullptr,
-                0, nullptr, 2, imageBarriersToGeneral);
+                vk::DependencyFlagBits::eByRegion, {}, {},
+                getImagePipelineBarrier(
+                    vk::AccessFlagBits::eNoneKHR, vk::AccessFlagBits::eShaderWrite,
+                    vk::ImageLayout::eUndefined, vk::ImageLayout::eGeneral, renderTargetImage.image));
 
             record_ray_tracing(commandBuffer, 0);
 
@@ -836,7 +822,7 @@ uint32_t Vulkan::findMemoryTypeIndex(const uint32_t &memoryTypeBits, const vk::M
 }
 
 vk::ImageMemoryBarrier Vulkan::getImagePipelineBarrier(
-        const vk::AccessFlagBits &srcAccessFlags, const vk::AccessFlagBits &dstAccessFlags,
+        const vk::AccessFlags srcAccessFlags, const vk::AccessFlags dstAccessFlags,
         const vk::ImageLayout &oldLayout, const vk::ImageLayout &newLayout,
         const vk::Image &image) const {
 
@@ -898,6 +884,31 @@ void Vulkan::createImages() {
                                     vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferSrc);
 
     summedPixelColorImage = createImage(summedPixelColorImageFormat, vk::ImageUsageFlagBits::eStorage);
+
+    executeSingleTimeCommand(
+        [this](vk::CommandBuffer commandBuffer) {
+            commandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eNone,
+                vk::PipelineStageFlagBits::eTransfer,
+                vk::DependencyFlagBits::eByRegion,
+                {}, {},
+                getImagePipelineBarrier(
+                    vk::AccessFlagBits::eNoneKHR, vk::AccessFlagBits::eTransferWrite,
+                    vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal, summedPixelColorImage.image));
+            commandBuffer.clearColorImage(summedPixelColorImage.image, vk::ImageLayout::eTransferDstOptimal,
+                vk::ClearColorValue{},
+                vk::ImageSubresourceRange{}
+                    .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                    .setLayerCount(1)
+                    .setLevelCount(1));
+            commandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
+                vk::PipelineStageFlagBits::eRayTracingShaderKHR,
+                vk::DependencyFlagBits::eByRegion,
+                {}, {},
+                getImagePipelineBarrier(
+                    vk::AccessFlagBits::eTransferWrite, vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eShaderWrite,
+                    vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eGeneral, summedPixelColorImage.image));
+        }
+    );
 }
 
 void Vulkan::destroyImage(const VulkanImage &image) const {

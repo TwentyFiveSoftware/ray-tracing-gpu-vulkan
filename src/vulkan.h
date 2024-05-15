@@ -193,7 +193,7 @@ private:
                                                const vk::MemoryPropertyFlags &properties);
 
     [[nodiscard]] vk::ImageMemoryBarrier getImagePipelineBarrier(
-            const vk::AccessFlagBits &srcAccessFlags, const vk::AccessFlagBits &dstAccessFlags,
+            const vk::AccessFlags srcAccessFlags, const vk::AccessFlags dstAccessFlags,
             const vk::ImageLayout &oldLayout, const vk::ImageLayout &newLayout, const vk::Image &image) const;
 
     [[nodiscard]] VulkanImage createImage(const vk::Format &format,
