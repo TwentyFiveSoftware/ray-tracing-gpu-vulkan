@@ -66,7 +66,11 @@ Vulkan::~Vulkan() {
     destroyBuffer(sphereBuffer);
     destroyBuffer(aabbBuffer);
     destroyBuffer(shaderBindingTableBuffer);
-    destroyBuffer(renderCallInfoBuffer);
+    std::ranges::for_each(
+        renderCallInfoBuffers,
+        [this](auto buffer) {
+            destroyBuffer(buffer);
+        });
 
     std::ranges::for_each(swapChainImageViews, [this](auto swapChainImageView) {device.destroyImageView(swapChainImageView); });
     device.destroySwapchainKHR(swapChain);
@@ -88,11 +92,10 @@ void Vulkan::update() {
 }
 
 void Vulkan::render(const RenderCallInfo& renderCallInfo) {
-    updateRenderCallInfoBuffer(renderCallInfo);
     if (is_window_minimized()) {
         device.waitForFences(1, &m_fences[0], true, UINT64_MAX);
         device.resetFences(m_fences[0]);
-
+        updateRenderCallInfoBuffer(renderCallInfo, 0);
         computeQueue.submit(vk::SubmitInfo{}.setCommandBuffers(commandBuffersForNoPresent[0]), m_fences[0]);
         return;
     }
@@ -115,6 +118,7 @@ void Vulkan::render(const RenderCallInfo& renderCallInfo) {
         }
     }
     device.resetFences(fence);
+    updateRenderCallInfoBuffer(renderCallInfo, swapChainImageIndex);
 
     auto render_image_semaphore = get_render_image_semaphore(swapChainImageIndex);
 
@@ -442,37 +446,39 @@ void Vulkan::createDescriptorSetLayout() {
 }
 
 void Vulkan::createDescriptorPool() {
+    uint32_t swapchain_image_count = swapChainImages.size();
     std::vector<vk::DescriptorPoolSize> poolSizes = {
             {
                     .type = vk::DescriptorType::eStorageImage,
-                    .descriptorCount = 2
+                    .descriptorCount = 2 * swapchain_image_count
             },
             {
                     .type = vk::DescriptorType::eAccelerationStructureKHR,
-                    .descriptorCount = 1
+                    .descriptorCount = 1 * swapchain_image_count
             },
             {
                     .type = vk::DescriptorType::eUniformBuffer,
-                    .descriptorCount = 2
+                    .descriptorCount = 2 * swapchain_image_count
             }
     };
 
     rtDescriptorPool = device.createDescriptorPool(
             {
-                    .maxSets = 1,
+                    .maxSets = swapchain_image_count,
                     .poolSizeCount = static_cast<uint32_t>(poolSizes.size()),
                     .pPoolSizes = poolSizes.data()
             });
 }
 
 void Vulkan::createDescriptorSet() {
-    rtDescriptorSet = device.allocateDescriptorSets(
-            {
-                    .descriptorPool = rtDescriptorPool,
-                    .descriptorSetCount = 1,
-                    .pSetLayouts = &rtDescriptorSetLayout
-            }).front();
-
+    uint32_t swapchain_image_count = swapChainImages.size();
+    std::vector<vk::DescriptorSetLayout> layouts(swapchain_image_count);
+    std::ranges::fill(layouts, rtDescriptorSetLayout);
+    rtDescriptorSets = device.allocateDescriptorSets(
+        vk::DescriptorSetAllocateInfo{}
+        .setDescriptorPool(rtDescriptorPool)
+        .setSetLayouts(layouts)
+    );
 
     vk::DescriptorImageInfo renderTargetImageInfo = {
             .imageView = renderTargetImage.imageView,
@@ -495,53 +501,59 @@ void Vulkan::createDescriptorSet() {
             .imageLayout = vk::ImageLayout::eGeneral
     };
 
-    vk::DescriptorBufferInfo renderCallInfoBufferInfo = {
-            .buffer = renderCallInfoBuffer.buffer,
-            .offset = 0,
-            .range = sizeof(RenderCallInfo)
-    };
+    std::vector<vk::DescriptorBufferInfo> renderCallInfoBufferInfos(swapchain_image_count);
 
-    std::vector<vk::WriteDescriptorSet> descriptorWrites = {
+    std::vector<vk::WriteDescriptorSet> descriptorWrites{};
+    for (int i = 0; i < swapchain_image_count; i++) {
+        auto set = rtDescriptorSets[i];
+        descriptorWrites.push_back(
             {
-                    .dstSet = rtDescriptorSet,
+                    .dstSet = set,
                     .dstBinding = 0,
                     .dstArrayElement = 0,
                     .descriptorCount = 1,
                     .descriptorType = vk::DescriptorType::eStorageImage,
                     .pImageInfo = &renderTargetImageInfo
-            },
+            });
+        descriptorWrites.push_back(
             {
                     .pNext = &accelerationStructureInfo,
-                    .dstSet = rtDescriptorSet,
+                    .dstSet = set,
                     .dstBinding = 1,
                     .dstArrayElement = 0,
                     .descriptorCount = 1,
                     .descriptorType = vk::DescriptorType::eAccelerationStructureKHR
-            },
+            });
+        descriptorWrites.push_back(
             {
-                    .dstSet = rtDescriptorSet,
+                    .dstSet = set,
                     .dstBinding = 2,
                     .dstArrayElement = 0,
                     .descriptorCount = 1,
                     .descriptorType = vk::DescriptorType::eUniformBuffer,
                     .pBufferInfo = &sphereBufferInfo
-            },
+            });
+        descriptorWrites.push_back(
             {
-                    .dstSet = rtDescriptorSet,
+                    .dstSet = set,
                     .dstBinding = 3,
                     .dstArrayElement = 0,
                     .descriptorCount = 1,
                     .descriptorType = vk::DescriptorType::eStorageImage,
                     .pImageInfo = &summedPixelColorImageInfo
-            },
+            });
+        renderCallInfoBufferInfos[i] = vk::DescriptorBufferInfo{}
+            .setBuffer(renderCallInfoBuffers[i].buffer)
+            .setRange(vk::WholeSize);
+        descriptorWrites.push_back(
             {
-                    .dstSet = rtDescriptorSet,
+                    .dstSet = set,
                     .dstBinding = 4,
                     .dstArrayElement = 0,
                     .descriptorCount = 1,
                     .descriptorType = vk::DescriptorType::eUniformBuffer,
-                    .pBufferInfo = &renderCallInfoBufferInfo
-            }
+                    .pBufferInfo = &renderCallInfoBufferInfos[i]
+            });
     };
 
     device.updateDescriptorSets(static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data(),
@@ -652,11 +664,11 @@ std::vector<char> Vulkan::readBinaryFile(const std::string &path) {
     return buffer;
 }
 
-void Vulkan::record_ray_tracing(vk::CommandBuffer commandBuffer) {
+void Vulkan::record_ray_tracing(vk::CommandBuffer commandBuffer, int index) {
     // RAY TRACING
     commandBuffer.bindPipeline(vk::PipelineBindPoint::eRayTracingKHR, rtPipeline);
 
-    std::vector<vk::DescriptorSet> descriptorSets = { rtDescriptorSet };
+    std::vector<vk::DescriptorSet> descriptorSets = { rtDescriptorSets[index] };
     commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eRayTracingKHR, rtPipelineLayout,
         0, descriptorSets, nullptr);
 
@@ -694,7 +706,7 @@ void Vulkan::createCommandBuffer() {
             vk::DependencyFlagBits::eByRegion, 0, nullptr,
             0, nullptr, 2, imageBarriersToGeneral);
 
-        record_ray_tracing(commandBuffer);
+        record_ray_tracing(commandBuffer, swapChainImageIndex);
 
         // RENDER TARGET IMAGE: GENERAL -> TRANSFER SRC & SWAP CHAIN IMAGE: UNDEFINED -> TRANSFER DST
         vk::ImageMemoryBarrier imageBarriersToTransfer[2] = {
@@ -775,7 +787,7 @@ void Vulkan::createCommandBuffer() {
                 vk::DependencyFlagBits::eByRegion, 0, nullptr,
                 0, nullptr, 2, imageBarriersToGeneral);
 
-            record_ray_tracing(commandBuffer);
+            record_ray_tracing(commandBuffer, 0);
 
             commandBuffer.end();
 
@@ -1260,14 +1272,18 @@ vk::AabbPositionsKHR Vulkan::getAABBFromSphere(const glm::vec4 &geometry) {
 }
 
 void Vulkan::createRenderCallInfoBuffer() {
-    renderCallInfoBuffer = createBuffer(sizeof(RenderCallInfo), vk::BufferUsageFlagBits::eUniformBuffer,
-                                        vk::MemoryPropertyFlagBits::eHostVisible |
-                                        vk::MemoryPropertyFlagBits::eHostCoherent |
-                                        vk::MemoryPropertyFlagBits::eDeviceLocal);
+    renderCallInfoBuffers.resize(swapChainImages.size());
+    std::ranges::for_each(renderCallInfoBuffers,
+        [this](auto& buffer) {
+            buffer = createBuffer(sizeof(RenderCallInfo), vk::BufferUsageFlagBits::eUniformBuffer,
+            vk::MemoryPropertyFlagBits::eHostVisible |
+            vk::MemoryPropertyFlagBits::eHostCoherent |
+                vk::MemoryPropertyFlagBits::eDeviceLocal);
+        });
 }
 
-void Vulkan::updateRenderCallInfoBuffer(const RenderCallInfo &renderCallInfo) {
-    void* data = device.mapMemory(renderCallInfoBuffer.memory, 0, sizeof(RenderCallInfo));
+void Vulkan::updateRenderCallInfoBuffer(const RenderCallInfo &renderCallInfo, int index) {
+    void* data = device.mapMemory(renderCallInfoBuffers[index].memory, 0, sizeof(RenderCallInfo));
     memcpy(data, &renderCallInfo, sizeof(RenderCallInfo));
-    device.unmapMemory(renderCallInfoBuffer.memory);
+    device.unmapMemory(renderCallInfoBuffers[index].memory);
 }

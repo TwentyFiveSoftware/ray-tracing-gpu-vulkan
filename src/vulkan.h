@@ -93,7 +93,7 @@ private:
 
     vk::DescriptorSetLayout rtDescriptorSetLayout;
     vk::DescriptorPool rtDescriptorPool;
-    vk::DescriptorSet rtDescriptorSet;
+    std::vector<vk::DescriptorSet> rtDescriptorSets;
     vk::PipelineLayout rtPipelineLayout;
     vk::Pipeline rtPipeline;
 
@@ -135,7 +135,7 @@ private:
     vk::StridedDeviceAddressRegionKHR sbtRayGenAddressRegion, sbtHitAddressRegion, sbtMissAddressRegion;
 
     VulkanBuffer sphereBuffer;
-    VulkanBuffer renderCallInfoBuffer;
+    std::vector<VulkanBuffer> renderCallInfoBuffers;
 
     int m_width;
     int m_height;
@@ -180,7 +180,7 @@ private:
 
     [[nodiscard]] static std::vector<char> readBinaryFile(const std::string &path);
 
-    void record_ray_tracing(vk::CommandBuffer cmd);
+    void record_ray_tracing(vk::CommandBuffer cmd, int index);
     void createCommandBuffer();
 
     void createFence();
@@ -228,6 +228,6 @@ private:
 
     void createRenderCallInfoBuffer();
 
-    void updateRenderCallInfoBuffer(const RenderCallInfo &renderCallInfo);
+    void updateRenderCallInfoBuffer(const RenderCallInfo &renderCallInfo, int index);
 
 };
