@@ -39,6 +39,8 @@ int main(int argc, const char** argv) {
     auto renderBeginTime = std::chrono::steady_clock::now();
     int requiredRenderCalls = samples / samplesPerRenderCall;
 
+    auto previousRenderCallTime = std::chrono::steady_clock::now();
+
     for (uint32_t number = 1; number <= requiredRenderCalls; number++) {
         RenderCallInfo renderCallInfo = {
             .number = number,
@@ -49,12 +51,13 @@ int main(int argc, const char** argv) {
             << " (" << (number * samplesPerRenderCall) << " / " << samples
             << " samples)";
 
-        auto renderCallBeginTime = std::chrono::steady_clock::now();
-
         vulkan.render(renderCallInfo);
 
+        auto currentRenderCallTime = std::chrono::steady_clock::now();
+
         auto renderCallTime = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::steady_clock::now() - renderCallBeginTime).count();
+                currentRenderCallTime - previousRenderCallTime).count();
+        previousRenderCallTime = currentRenderCallTime;
         std::cout << " - Completed in " << renderCallTime << " ms" << std::endl;
 
         vulkan.update();

@@ -677,7 +677,7 @@ void Vulkan::record_ray_tracing(vk::CommandBuffer commandBuffer, int index) {
             getImagePipelineBarrier(
                 vk::AccessFlagBits::eShaderWrite | vk::AccessFlagBits::eShaderRead,
                 vk::AccessFlagBits::eShaderWrite | vk::AccessFlagBits::eShaderRead,
-                vk::ImageLayout::eGeneral, vk::ImageLayout::eGeneral, renderTargetImage.image)
+                vk::ImageLayout::eGeneral, vk::ImageLayout::eGeneral, summedPixelColorImage.image)
         });
 
     // RAY TRACING
@@ -882,11 +882,11 @@ void Vulkan::createImages() {
     renderTargetImage = createImage(swapChainImageFormat,
                                     vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferSrc);
 
-    summedPixelColorImage = createImage(summedPixelColorImageFormat, vk::ImageUsageFlagBits::eStorage);
+    summedPixelColorImage = createImage(summedPixelColorImageFormat, vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferDst);
 
     executeSingleTimeCommand(
         [this](vk::CommandBuffer commandBuffer) {
-            commandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eNone,
+            commandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eTopOfPipe,
                 vk::PipelineStageFlagBits::eTransfer,
                 vk::DependencyFlagBits::eByRegion,
                 {}, {},
