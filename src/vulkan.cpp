@@ -665,6 +665,21 @@ std::vector<char> Vulkan::readBinaryFile(const std::string &path) {
 }
 
 void Vulkan::record_ray_tracing(vk::CommandBuffer commandBuffer, int index) {
+    // RENDER TARGET IMAGE UNDEFINED -> GENERAL
+    // Sync summed pixel color image with previous ray tracing.
+    commandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eRayTracingShaderKHR,
+        vk::PipelineStageFlagBits::eRayTracingShaderKHR,
+        vk::DependencyFlagBits::eByRegion, {}, {},
+        std::array{
+            getImagePipelineBarrier(
+                vk::AccessFlagBits::eNoneKHR, vk::AccessFlagBits::eShaderWrite,
+                vk::ImageLayout::eUndefined, vk::ImageLayout::eGeneral, renderTargetImage.image),
+            getImagePipelineBarrier(
+                vk::AccessFlagBits::eShaderWrite | vk::AccessFlagBits::eShaderRead,
+                vk::AccessFlagBits::eShaderWrite | vk::AccessFlagBits::eShaderRead,
+                vk::ImageLayout::eGeneral, vk::ImageLayout::eGeneral, renderTargetImage.image)
+        });
+
     // RAY TRACING
     commandBuffer.bindPipeline(vk::PipelineBindPoint::eRayTracingKHR, rtPipeline);
 
@@ -690,14 +705,6 @@ void Vulkan::createCommandBuffer() {
 
         vk::CommandBufferBeginInfo beginInfo = {};
         commandBuffer.begin(&beginInfo);
-
-        // RENDER TARGET IMAGE UNDEFINED -> GENERAL
-        commandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eRayTracingShaderKHR,
-            vk::PipelineStageFlagBits::eRayTracingShaderKHR,
-            vk::DependencyFlagBits::eByRegion, {}, {},
-            getImagePipelineBarrier(
-                vk::AccessFlagBits::eNoneKHR, vk::AccessFlagBits::eShaderWrite,
-                vk::ImageLayout::eUndefined, vk::ImageLayout::eGeneral, renderTargetImage.image));
 
         record_ray_tracing(commandBuffer, swapChainImageIndex);
 
@@ -764,14 +771,6 @@ void Vulkan::createCommandBuffer() {
 
             vk::CommandBufferBeginInfo beginInfo = {};
             commandBuffer.begin(&beginInfo);
-
-            // RENDER TARGET IMAGE UNDEFINED -> GENERAL
-            commandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eRayTracingShaderKHR,
-                vk::PipelineStageFlagBits::eRayTracingShaderKHR,
-                vk::DependencyFlagBits::eByRegion, {}, {},
-                getImagePipelineBarrier(
-                    vk::AccessFlagBits::eNoneKHR, vk::AccessFlagBits::eShaderWrite,
-                    vk::ImageLayout::eUndefined, vk::ImageLayout::eGeneral, renderTargetImage.image));
 
             record_ray_tracing(commandBuffer, 0);
 
